@@ -1,10 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import { PAPER_SIZES, validateCustomSize } from '@/lib/paperSizes';
-import { useEditorStore } from '@/stores/editorStore';
-import type { BleedMm, GutterMm, LayoutType } from '@/types';
-import { canExportOnDevice } from '@/lib/exportPdf';
+import { PAPER_SIZES } from '@/lib/paperSizes';
+import { maxMarginFor, maxMarginForSide, useEditorStore, type MarginSide } from '@/stores/editorStore';
+import { LAYOUT_COUNTS } from '@/lib/layoutCalc';
+import type { BleedMm, GutterMm } from '@/types';
+
+const MARGIN_SIDE_LABELS: Record<MarginSide, string> = {
+  top: '위',
+  right: '오른쪽',
+  bottom: '아래',
+  left: '왼쪽',
+};
+
+/**
+ * 목업(액자) 미리보기 노출 여부. 현재는 숨김 — true로 바꾸면 미리보기 버튼이 다시 나온다.
+ * (기능·모달 코드는 그대로 유지)
+ */
+const MOCKUP_PREVIEW_ENABLED = false;
+
+/**
+ * 사진 테두리(폴라로이드·인생네컷) 선택 UI 노출 여부. 현재는 숨김.
+ * (렌더링·스토어 코드는 그대로 유지 — true로 바꾸면 다시 노출)
+ */
+const PHOTO_FRAME_ENABLED = false;
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -38,21 +57,25 @@ function Chip({
   );
 }
 
-export default function SettingsPanel({ onExport }: { onExport: (format: 'png' | 'jpg' | 'pdf') => void }) {
+export default function SettingsPanel({
+  onExport,
+  onPreview,
+  includeBleed,
+  onIncludeBleedChange,
+  exporting = false,
+}: {
+  onExport: (format: 'png' | 'jpg' | 'pdf') => void;
+  onPreview: () => void;
+  includeBleed: boolean;
+  onIncludeBleedChange: (v: boolean) => void;
+  exporting?: boolean;
+}) {
   const s = useEditorStore();
-  const [customW, setCustomW] = useState('210');
-  const [customH, setCustomH] = useState('297');
-  const [customError, setCustomError] = useState<string | null>(null);
+  const [marginLinked, setMarginLinked] = useState(true);
 
-  const applyCustom = () => {
-    const w = Number(customW);
-    const h = Number(customH);
-    const err = validateCustomSize(w, h);
-    setCustomError(err);
-    if (!err) s.setPaper('custom', { w, h });
-  };
-
-  const exportable = canExportOnDevice(s.widthMm + s.bleedMm * 2, s.heightMm + s.bleedMm * 2);
+  const pageWmm = includeBleed ? s.widthMm + s.bleedMm * 2 : s.widthMm;
+  const pageHmm = includeBleed ? s.heightMm + s.bleedMm * 2 : s.heightMm;
+  const hasPhotos = s.photos.length > 0;
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -63,32 +86,7 @@ export default function SettingsPanel({ onExport }: { onExport: (format: 'png' |
               {p.label}
             </Chip>
           ))}
-          <Chip active={s.paperId === 'custom'} onClick={applyCustom}>
-            Custom
-          </Chip>
         </div>
-        {s.paperId === 'custom' || customError ? (
-          <div className="mt-2 flex items-center gap-1.5 text-sm">
-            <input
-              value={customW}
-              onChange={(e) => setCustomW(e.target.value)}
-              className="w-16 rounded border border-stone-300 px-2 py-1"
-              inputMode="numeric"
-            />
-            ×
-            <input
-              value={customH}
-              onChange={(e) => setCustomH(e.target.value)}
-              className="w-16 rounded border border-stone-300 px-2 py-1"
-              inputMode="numeric"
-            />
-            <span className="text-stone-400">mm</span>
-            <button onClick={applyCustom} className="ml-1 rounded bg-stone-800 px-2 py-1 text-xs text-white">
-              적용
-            </button>
-          </div>
-        ) : null}
-        {customError && <p className="mt-1 text-xs text-red-600">{customError}</p>}
         <div className="mt-2 flex gap-1.5">
           <Chip active={s.orientation === 'portrait'} onClick={() => s.orientation !== 'portrait' && s.toggleOrientation()}>
             세로
@@ -100,14 +98,29 @@ export default function SettingsPanel({ onExport }: { onExport: (format: 'png' |
       </Section>
 
       <Section title="레이아웃">
-        <div className="flex gap-1.5">
-          {([1, 2, 4, 6] as LayoutType[]).map((n) => (
+        <div className="flex flex-wrap gap-1.5">
+          {LAYOUT_COUNTS.map((n) => (
             <Chip key={n} active={s.layoutType === n} onClick={() => s.setLayout(n)}>
               {n}장
             </Chip>
           ))}
         </div>
-        <div className="mt-2 flex items-center gap-1.5">
+
+        {s.layoutType === 1 ? (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-stone-500">사진 형태</span>
+            <Chip active={s.singleShape === 'rect'} onClick={() => s.setSingleShape('rect')}>
+              용지 꽉 채움
+            </Chip>
+            <Chip active={s.singleShape === 'square'} onClick={() => s.setSingleShape('square')}>
+              정사각형
+            </Chip>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-stone-400">슬롯은 정사각형입니다.</p>
+        )}
+
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-stone-500">간격</span>
           {([0, 2, 5] as GutterMm[]).map((g) => (
             <Chip key={g} active={s.gutterMm === g} onClick={() => s.setGutter(g)}>
@@ -115,51 +128,157 @@ export default function SettingsPanel({ onExport }: { onExport: (format: 'png' |
             </Chip>
           ))}
         </div>
+
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs text-stone-500">상하좌우 여백</span>
+            <button
+              onClick={() => setMarginLinked((v) => !v)}
+              className="text-xs text-accent underline-offset-2 hover:underline"
+            >
+              {marginLinked ? '변마다 따로 조절' : '네 변 동일하게'}
+            </button>
+          </div>
+
+          {marginLinked ? (
+            <>
+              <input
+                type="range"
+                min={0}
+                max={maxMarginFor(s.widthMm, s.heightMm)}
+                step={1}
+                value={s.margins.top}
+                onChange={(e) => s.setMargin(Number(e.target.value))}
+                className="w-full accent-accent"
+                aria-label="상하좌우 여백 mm"
+              />
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {[0, 8, 12, 20, 30, 50]
+                  .filter((m) => m <= maxMarginFor(s.widthMm, s.heightMm))
+                  .map((m) => (
+                    <Chip
+                      key={m}
+                      active={s.margins.top === m && s.margins.right === m && s.margins.bottom === m && s.margins.left === m}
+                      onClick={() => s.setMargin(m)}
+                    >
+                      {m}mm
+                    </Chip>
+                  ))}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              {(['top', 'right', 'bottom', 'left'] as MarginSide[]).map((side) => (
+                <div key={side}>
+                  <div className="mb-0.5 flex items-center justify-between">
+                    <span className="text-xs text-stone-500">{MARGIN_SIDE_LABELS[side]}</span>
+                    <span className="text-xs font-medium text-stone-700">{s.margins[side]}mm</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={maxMarginForSide(s.widthMm, s.heightMm, side, s.margins)}
+                    step={1}
+                    value={s.margins[side]}
+                    onChange={(e) => s.setMarginSide(side, Number(e.target.value))}
+                    className="w-full accent-accent"
+                    aria-label={`${MARGIN_SIDE_LABELS[side]} 여백 mm`}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-1 text-xs text-stone-400">사진 바깥 흰 여백 — 웨딩 사진은 넉넉하게 권장합니다.</p>
+        </div>
       </Section>
+
+      {PHOTO_FRAME_ENABLED && (
+        <Section title="사진 테두리">
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ['none', '없음'],
+                ['polaroid', '폴라로이드'],
+                ['life4cut', '인생네컷'],
+              ] as const
+            ).map(([id, label]) => (
+              <Chip key={id} active={s.photoFrame === id} onClick={() => s.setPhotoFrame(id)}>
+                {label}
+              </Chip>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-stone-400">사진마다 테두리 디자인을 입힙니다. 출력 파일에도 반영됩니다.</p>
+        </Section>
+      )}
 
       <Section title="인쇄 여백 (Bleed)">
         <div className="flex gap-1.5">
-          {([3, 5] as BleedMm[]).map((b) => (
+          {([0, 3, 5] as BleedMm[]).map((b) => (
             <Chip key={b} active={s.bleedMm === b} onClick={() => s.setBleed(b)}>
               {b}mm
             </Chip>
           ))}
         </div>
         <p className="mt-1.5 text-xs text-stone-400">
-          회색: 재단 시 잘리는 영역 · 점선: 안전 영역(얼굴은 이 안에)
+          회색: 재단 시 잘리는 영역 — 화면 가이드일 뿐이며 출력 파일에는 찍히지 않습니다.
         </p>
       </Section>
 
-      <Section title="선택한 사진">
-        {s.selectedId ? (
+      {s.selectedId && (
+        <Section title="선택한 사진">
           <PhotoTools />
-        ) : (
-          <p className="text-xs text-stone-400">캔버스에서 사진을 선택하세요.</p>
-        )}
-      </Section>
+        </Section>
+      )}
+
+      {MOCKUP_PREVIEW_ENABLED && (
+        <Section title="미리보기">
+          <button
+            onClick={onPreview}
+            disabled={!hasPhotos || exporting}
+            className="w-full rounded-md border border-stone-300 py-2 text-sm font-medium disabled:opacity-40"
+          >
+            액자 미리보기
+          </button>
+          <p className="mt-1.5 text-xs text-stone-400">현재 조판을 액자로 걸어 놓은 모습으로 미리 봅니다.</p>
+        </Section>
+      )}
 
       <Section title="다운로드">
-        {!exportable && (
-          <p className="mb-2 rounded bg-amber-50 p-2 text-xs text-amber-800">
-            이 규격의 300dpi 출력은 이 기기에서 지원되지 않습니다. 데스크탑에서 다운로드해주세요.
-          </p>
-        )}
         <div className="flex gap-1.5">
           <button
             onClick={() => onExport('pdf')}
-            disabled={!exportable}
+            disabled={exporting}
             className="flex-1 rounded-md bg-ink py-2 text-sm font-medium text-white disabled:opacity-40"
           >
-            300dpi PDF
+            {exporting ? '내보내는 중…' : 'PDF'}
           </button>
-          <button onClick={() => onExport('png')} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
+          <button
+            onClick={() => onExport('png')}
+            disabled={exporting}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm disabled:opacity-40"
+          >
             PNG
           </button>
-          <button onClick={() => onExport('jpg')} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
+          <button
+            onClick={() => onExport('jpg')}
+            disabled={exporting}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm disabled:opacity-40"
+          >
             JPG
           </button>
         </div>
-        <p className="mt-1.5 text-xs text-stone-400">출력 파일은 sRGB 기반 인쇄 파일입니다.</p>
+        <label className="mt-2 flex items-center gap-1.5 text-xs text-stone-600">
+          <input
+            type="checkbox"
+            checked={includeBleed}
+            onChange={(e) => onIncludeBleedChange(e.target.checked)}
+          />
+          인쇄소 제출용 (재단 여백 {s.bleedMm}mm 포함)
+        </label>
+        <p className="mt-1.5 text-xs text-stone-400">
+          출력 크기 {pageWmm}×{pageHmm}mm · sRGB 기반 인쇄 파일입니다.
+          {!includeBleed && ' 가정용 프린터는 이 상태로 출력하세요.'}
+        </p>
       </Section>
     </div>
   );

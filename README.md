@@ -23,18 +23,25 @@ npm run build
 
 | 영역 | 상태 |
 | --- | --- |
-| 용지 선택(6종 + Custom, A2 상한 검증) · 세로/가로 토글 | ✅ |
-| 레이아웃 1/2/4/6장 (방향 자동 변형) · gutter 0/2/5mm | ✅ |
-| 업로드 파이프라인 (HEIC 변환·EXIF 보정·원본/편집용 이중 관리) | ✅ |
-| Bleed(3/5mm)·재단선·안전선(5mm 고정)·재단 표시선 | ✅ |
+| 용지 선택(A2~A5) · 세로/가로 토글 | ✅ |
+| 레이아웃 1·4·9·16장 · 정사각형 슬롯(1장은 정사각형/직사각형 선택) · gutter 0/2/5mm | ✅ |
+| 상하좌우 여백 — 네 변 동일(0~50mm, 기본 12mm) 또는 변마다 개별 조절 | ✅ |
+| Bleed 0/3/5mm · 재단선 · 재단 표시선 (화면 가이드 전용, 출력물엔 미포함) | ✅ |
+| PNG/JPG/PDF 추출 — 모바일 포함, 페이지=용지 실측, 대용량은 기기 한계에 맞춰 자동 축소 | ✅ |
+| 인쇄소 제출용 bleed 포함 추출 옵션 | ✅ |
 | 슬롯 드롭 → cover 자동 채움 · 내부 이동/확대(wheel)·회전·반전 | ✅ |
+| 사진 hover(모바일: 선택) 시 ✕ 삭제 버튼 | ✅ |
+| 터치: 탭-투-배치 · 두 손가락 핀치 줌 | ✅ |
+| 라이브러리 순번 배지 · 배치된 사진 명암 표시 · 썸네일 재드래그 중복 방지 | ✅ |
+| 업로드 파이프라인 (HEIC 변환·EXIF 보정·원본/편집용 이중 관리) | ✅ |
 | Undo/Redo (zundo, 50단계) · Delete/ESC/Cmd+Z 단축키 | ✅ |
-| PNG/JPG/300dpi PDF 추출 · 모바일 대용량 규격 감지 | ✅ |
 | 자동 저장 (2초 디바운스 → IndexedDB) | ✅ 설정값 (사진 포함 복구는 TODO) |
+| 사진 테두리 디자인 — 폴라로이드/인생네컷 | 🔲 구현됨, `PHOTO_FRAME_ENABLED`로 숨김 |
+| 목업 미리보기 — 조판을 흰 액자로 선반/벽 장면에 합성 | 🔲 구현됨, `MOCKUP_PREVIEW_ENABLED`로 숨김 |
+| 액자/매트지 미리보기 | 🔲 구현됨, `FRAME_PREVIEW_ENABLED`로 숨김 |
 | 추출 시 원본(originalKey) 교체 렌더링 | 🔲 TODO — 현재는 편집용 2000px 소스로 추출 |
 | 복구 프롬프트("이어서 하시겠습니까?") | 🔲 TODO |
-| 터치 핀치 줌 | 🔲 TODO |
-| 밝기/대비/채도 필터 · 자유 배치 · 액자/매트지 미리보기 | 2차 릴리스 |
+| 밝기/대비/채도 필터 · 자유 배치 | 2차 릴리스 |
 | AI 얼굴 인식 배치 · 커스텀 레이아웃 편집기 | 3차 릴리스 |
 
 ## 폴더 구조
@@ -43,17 +50,39 @@ npm run build
 src/
 ├─ app/                 # 랜딩(/), 에디터(/editor)
 ├─ components/
-│  ├─ Editor.tsx        # 3패널(데스크탑)/바텀시트(모바일) 통합
-│  ├─ canvas/           # PaperCanvas (인쇄 가이드·슬롯·사진 노드)
-│  └─ panels/           # LibraryPanel(업로드·사진목록), SettingsPanel
-├─ stores/editorStore.ts# 용지·레이아웃·사진 통합 스토어 (zundo)
+│  ├─ Editor.tsx        # 3패널(데스크탑)/바텀시트(모바일) 통합, 캔버스는 단일 마운트
+│  ├─ canvas/           # PaperCanvas (인쇄 가이드·슬롯·사진 노드), FramePreview
+│  └─ panels/           # LibraryPanel, SettingsPanel, FramePanel
+├─ stores/              # editorStore(zundo), frameStore(미리보기 전용)
 ├─ hooks/useAutoSave.ts
-├─ lib/                 # convertMM, paperSizes, layoutCalc,
+├─ lib/                 # convertMM, paperSizes, layoutCalc, frames,
 │                       # imagePipeline, exportPdf, storage
 └─ types/
 ```
 
+## 출력 파일 규칙
+
+- PDF/이미지 페이지 크기는 **용지 실측 그대로**입니다 (A4 → 정확히 210×297mm, 300dpi 2480×3508px).
+- 화면의 회색 bleed·재단선·안전선·재단 표시선과 액자는 **가이드일 뿐 출력물에 포함되지 않습니다.**
+  추출 직전 `PaperCanvas`를 `mode='export'`로 다시 그린 뒤 재단 영역만 crop합니다.
+- 인쇄소 제출이 필요하면 다운로드 섹션의 "인쇄소 제출용" 체크로 bleed까지 포함해 내보낼 수 있습니다.
+
+## README 자동 갱신
+
+`git push` 직전에 `.githooks/pre-push`가 `readme-updater` 서브에이전트(`.claude/agents/readme-updater.md`)를
+실행해 README를 코드 변경과 맞춥니다. 최초 1회만 아래 설정이 필요합니다.
+
+```bash
+git config core.hooksPath .githooks
+```
+
+README가 수정되면 push가 중단됩니다. 내용을 확인하고 커밋한 뒤 다시 push하세요.
+건너뛰려면 `SKIP_README_AGENT=1 git push`.
+
+`.claude/agents/ui-ux-reviewer.md`는 UI 변경 후 실제 브라우저(Playwright)로 데스크탑·모바일
+화면을 조작해 레이아웃·터치 타겟·카피 일관성을 점검하는 서브에이전트다. 필요할 때 호출한다.
+
 ## 주의
 
 - 출력 파일은 sRGB 기반 인쇄 파일입니다 (브라우저 캔버스 한계). CMYK 변환은 장기 로드맵.
-- 모바일에서 A3 이상 300dpi 추출은 기기 한계로 차단되며 데스크탑 안내가 표시됩니다.
+- 모바일에서도 PDF/이미지를 받을 수 있습니다. 기기 캔버스 한계를 넘는 대형 규격(A2 등)은 비율을 유지한 채 해상도를 낮춰 추출합니다.

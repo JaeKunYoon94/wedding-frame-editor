@@ -2,9 +2,27 @@
 
 export type Orientation = "portrait" | "landscape";
 export type LayoutMode = "grid" | "free";
-export type LayoutType = 1 | 2 | 4 | 6; // MVP: 1/2/4/6장 (3/9장은 2차)
-export type BleedMm = 3 | 5;
+export type LayoutType = 1 | 4 | 9 | 16; // 정사각형 슬롯 격자: 1×1 / 2×2 / 3×3 / 4×4
+/** 1장 레이아웃 슬롯 형태: 정사각형 / 용지 비율로 꽉 채운 직사각형 */
+export type SingleShape = "square" | "rect";
+
+/** 사진 테두리 디자인 (출력물에도 반영됨) */
+export type PhotoFrame = "none" | "polaroid" | "life4cut";
+export type BleedMm = 0 | 3 | 5;
 export type GutterMm = 0 | 2 | 5;
+
+/** 재단선 안쪽 상하좌우 여백(mm) — 변마다 독립적으로 조절 가능 */
+export interface Margins {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** 기획안 v2 §9: 액자 미리보기 (출력물에는 포함되지 않음) */
+export type FrameId = "none" | "black" | "white" | "wood" | "gold" | "silver";
+export type MatWidthMm = 0 | 30 | 50;
+export type MatColor = "white" | "ivory";
 
 export interface PaperSize {
   id: string;

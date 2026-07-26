@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+# push 직전에 readme-updater 에이전트를 돌려 README.md를 코드와 맞춘다.
+#
+# - claude CLI가 없으면 조용히 통과한다.
+# - README가 수정되면 push를 중단한다. 내용을 확인하고 커밋한 뒤 다시 push하면 된다.
+#   (자동 커밋을 원하면 아래 AUTO_COMMIT=1 로 바꾼다.)
+# - 이번 push만 건너뛰려면: SKIP_README_AGENT=1 git push
+#
+AUTO_COMMIT=0
+
+set -e
+
+if [ "$SKIP_README_AGENT" = "1" ]; then
+  exit 0
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "[readme-updater] claude CLI를 찾을 수 없어 건너뜁니다."
+  exit 0
+fi
+
+# 이미 수정 중인 README가 있으면 에이전트 결과와 섞이므로 중단한다.
+if ! git diff --quiet -- README.md || ! git diff --cached --quiet -- README.md; then
+  echo "[readme-updater] README.md에 커밋되지 않은 변경이 있어 건너뜁니다."
+  exit 0
+fi
+
+echo "[readme-updater] README.md를 코드 변경에 맞춰 점검하는 중..."
+
+claude -p "readme-updater 서브에이전트를 사용해서 이번에 push될 커밋들의 변경 내용에 맞게 README.md를 갱신해줘. 고칠 게 없으면 아무것도 수정하지 마." \
+  --permission-mode acceptEdits \
+  --allowedTools "Bash,Read,Edit,Write,Grep,Glob" \
+  </dev/null || {
+    echo "[readme-updater] 에이전트 실행에 실패했습니다. push는 그대로 진행합니다."
+    exit 0
+  }
+
+if git diff --quiet -- README.md; then
+  echo "[readme-updater] 변경 없음. push를 계속합니다."
+  exit 0
+fi
+
+if [ "$AUTO_COMMIT" = "1" ]; then
+  git add README.md
+  git commit -m "docs: README 자동 갱신 (readme-updater)"
+  echo "[readme-updater] README를 커밋했습니다. 새 커밋을 포함하려면 다시 push 해주세요."
+  exit 1
+fi
+
+echo ""
+echo "[readme-updater] README.md가 갱신되었습니다. 내용을 확인한 뒤 커밋하고 다시 push 해주세요:"
+echo ""
+git --no-pager diff --stat -- README.md
+echo ""
+echo "  git add README.md && git commit -m \"docs: README 갱신\" && git push"
+echo ""
+echo "  (이번 push를 그냥 진행하려면: SKIP_README_AGENT=1 git push)"
+exit 1
