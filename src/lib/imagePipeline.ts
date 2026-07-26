@@ -21,7 +21,7 @@ async function toDecodableBlob(file: File): Promise<Blob> {
   if (!isHeic(file)) return file;
   // heic2any는 window 의존 → 동적 import (SSR 회피)
   const heic2any = (await import('heic2any')).default;
-  const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+  const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.98 });
   return Array.isArray(converted) ? converted[0] : converted;
 }
 
@@ -56,8 +56,13 @@ async function normalizeOrientation(blob: Blob): Promise<Blob> {
   }
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
+
+  // 원본 보관용 재인코딩이므로 PNG는 무손실 그대로, JPEG는 최고 품질로 저장해
+  // 회전 보정 과정에서 화질이 깎이지 않게 한다.
+  const outType = blob.type === 'image/png' ? 'image/png' : 'image/jpeg';
+  const quality = outType === 'image/jpeg' ? 1 : undefined;
   return new Promise((resolve) =>
-    canvas.toBlob((b) => resolve(b ?? blob), 'image/jpeg', 0.95),
+    canvas.toBlob((b) => resolve(b ?? blob), outType, quality),
   );
 }
 

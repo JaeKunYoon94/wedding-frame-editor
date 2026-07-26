@@ -14,6 +14,7 @@ import type {
   Photo,
   PhotoFrame,
   SingleShape,
+  TextBox,
 } from '@/types';
 import { DEFAULT_PAPER_ID, PAPER_SIZES, getPaperSize } from '@/lib/paperSizes';
 import { LAYOUT_COUNTS, calcCells, clampOffset, coverFit } from '@/lib/layoutCalc';
@@ -54,6 +55,10 @@ interface EditorState {
   photos: Photo[];
   selectedId: string | null;
 
+  // texts
+  texts: TextBox[];
+  selectedTextId: string | null;
+
   // actions
   setPaper: (id: string, custom?: { w: number; h: number }) => void;
   toggleOrientation: () => void;
@@ -75,6 +80,13 @@ interface EditorState {
   zoomPhotoInCell: (id: string, factor: number) => void;
   removePhoto: (id: string) => void;
   select: (id: string | null) => void;
+
+  /** 용지 중앙에 새 텍스트박스를 추가하고 선택한다 */
+  addText: () => void;
+  updateText: (id: string, patch: Partial<TextBox>) => void;
+  removeText: (id: string) => void;
+  selectText: (id: string | null) => void;
+
   hydrate: (state: Partial<EditorState>) => void;
 }
 
@@ -189,6 +201,9 @@ export const useEditorStore = create<EditorState>()(
       library: [],
       photos: [],
       selectedId: null,
+
+      texts: [],
+      selectedTextId: null,
 
       setPaper: (id, custom) => {
         const base =
@@ -306,6 +321,7 @@ export const useEditorStore = create<EditorState>()(
         set({
           photos: [...photos.filter((p) => p.cellId !== cellId), photo],
           selectedId: photo.id,
+          selectedTextId: null,
         });
       },
 
@@ -332,6 +348,7 @@ export const useEditorStore = create<EditorState>()(
             return p;
           }),
           selectedId: source.id,
+          selectedTextId: null,
         });
       },
 
@@ -377,7 +394,38 @@ export const useEditorStore = create<EditorState>()(
           selectedId: s.selectedId === id ? null : s.selectedId,
         })),
 
-      select: (selectedId) => set({ selectedId }),
+      select: (selectedId) => set({ selectedId, selectedTextId: null }),
+
+      addText: () => {
+        const { widthMm, heightMm, texts } = get();
+        const width = Math.min(80, widthMm * 0.6);
+        const fontSizeMm = Math.max(4, Math.round(widthMm * 0.03));
+        const text: TextBox = {
+          id: crypto.randomUUID(),
+          text: '텍스트를 입력하세요',
+          x: (widthMm - width) / 2,
+          y: (heightMm - fontSizeMm) / 2,
+          width,
+          fontSizeMm,
+          color: '#1c1917',
+          align: 'center',
+          bold: false,
+          rotation: 0,
+          zIndex: texts.length,
+        };
+        set({ texts: [...texts, text], selectedTextId: text.id, selectedId: null });
+      },
+
+      updateText: (id, patch) =>
+        set((s) => ({ texts: s.texts.map((t) => (t.id === id ? { ...t, ...patch } : t)) })),
+
+      removeText: (id) =>
+        set((s) => ({
+          texts: s.texts.filter((t) => t.id !== id),
+          selectedTextId: s.selectedTextId === id ? null : s.selectedTextId,
+        })),
+
+      selectText: (selectedTextId) => set({ selectedTextId, selectedId: null }),
 
       hydrate: (state) =>
         set((s) => {
@@ -407,6 +455,7 @@ export const useEditorStore = create<EditorState>()(
         photoFrame: s.photoFrame,
         cells: s.cells,
         photos: s.photos,
+        texts: s.texts,
       }),
     },
   ),

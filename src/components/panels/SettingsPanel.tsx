@@ -273,6 +273,22 @@ export default function SettingsPanel({
         </Section>
       )}
 
+      <Section title="텍스트">
+        <button
+          onClick={() => s.addText()}
+          className="w-full rounded-md border border-stone-300 py-2 text-sm font-medium hover:border-stone-400"
+        >
+          + 텍스트 추가
+        </button>
+        <p className="mt-1.5 text-xs text-stone-400">용지 위 아무 곳에나 드래그해 배치할 수 있습니다.</p>
+      </Section>
+
+      {s.selectedTextId && (
+        <Section title="선택한 텍스트">
+          <TextTools />
+        </Section>
+      )}
+
       {MOCKUP_PREVIEW_ENABLED && (
         <Section title="미리보기">
           <button
@@ -364,6 +380,69 @@ function PhotoFilterTools() {
       <Chip active={photo.grayscale} onClick={() => updatePhoto(photo.id, { grayscale: !photo.grayscale })}>
         흑백
       </Chip>
+    </div>
+  );
+}
+
+function TextTools() {
+  const { selectedTextId, texts, updateText, removeText } = useEditorStore();
+  const textBox = texts.find((t) => t.id === selectedTextId);
+  if (!textBox) return null;
+  return (
+    <div className="space-y-2.5">
+      <textarea
+        value={textBox.text}
+        onChange={(e) => updateText(textBox.id, { text: e.target.value })}
+        rows={2}
+        className="w-full resize-none rounded-md border border-stone-300 p-2 text-sm"
+        placeholder="문구를 입력하세요"
+      />
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-stone-500">글자 크기</span>
+        <span className="text-xs font-medium text-stone-700">{textBox.fontSizeMm}mm</span>
+      </div>
+      <input
+        type="range"
+        min={3}
+        max={30}
+        step={1}
+        value={textBox.fontSizeMm}
+        onChange={(e) => updateText(textBox.id, { fontSizeMm: Number(e.target.value) })}
+        className="w-full accent-accent"
+        aria-label="글자 크기 mm"
+      />
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-stone-500">정렬</span>
+        {(['left', 'center', 'right'] as const).map((align) => (
+          <Chip key={align} active={textBox.align === align} onClick={() => updateText(textBox.id, { align })}>
+            {align === 'left' ? '왼쪽' : align === 'center' ? '가운데' : '오른쪽'}
+          </Chip>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-stone-500">굵게</span>
+        <Chip active={textBox.bold} onClick={() => updateText(textBox.id, { bold: !textBox.bold })}>
+          B
+        </Chip>
+        <span className="ml-2 text-xs text-stone-500">색상</span>
+        <input
+          type="color"
+          value={textBox.color}
+          onChange={(e) => updateText(textBox.id, { color: e.target.value })}
+          className="h-7 w-9 cursor-pointer rounded border border-stone-300 p-0.5"
+          aria-label="글자 색상"
+        />
+      </div>
+
+      <button
+        className="rounded border border-red-200 px-2 py-1 text-sm text-red-600"
+        onClick={() => removeText(textBox.id)}
+      >
+        삭제
+      </button>
     </div>
   );
 }

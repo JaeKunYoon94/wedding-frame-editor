@@ -74,6 +74,24 @@ export interface Photo {
   cellId?: string;
 }
 
+/** 용지 위에 자유롭게 배치하는 텍스트 (출력물에도 반영됨) */
+export interface TextBox {
+  id: string;
+  text: string;
+  /** mm, 재단선 원점 기준 좌상단 */
+  x: number;
+  y: number;
+  /** mm — 줄바꿈 기준 폭 */
+  width: number;
+  /** mm 단위 글자 크기 (mm 좌표계와 일관되게) */
+  fontSizeMm: number;
+  color: string;
+  align: "left" | "center" | "right";
+  bold: boolean;
+  rotation: number;
+  zIndex: number;
+}
+
 export interface LibraryItem {
   id: string;
   src: string;

@@ -25,6 +25,8 @@ export default function Editor() {
   const stageRef = useRef<Konva.Stage | null>(null);
   const [tab, setTab] = useState<MobileTab>(null);
   const [pending, setPending] = useState<ExportFormat | null>(null);
+  /** true가 되면 배치된 사진이 고화질 원본으로 교체 렌더링된 상태 (PaperCanvas가 신호) */
+  const [originalsReady, setOriginalsReady] = useState(false);
   /** 목업 미리보기: 캡처 중 여부 + 캡처된 인쇄물 dataURL */
   const [capturing, setCapturing] = useState(false);
   const [mockupUrl, setMockupUrl] = useState<string | null>(null);
@@ -49,7 +51,8 @@ export default function Editor() {
   const handleExport = (format: ExportFormat) => {
     if (!stageRef.current) return;
     select(null); // 선택 테두리가 출력물에 찍히지 않도록
-    setPending(format); // → 가이드·액자가 꺼진 상태로 리렌더된 뒤 useEffect에서 추출
+    setOriginalsReady(false);
+    setPending(format); // → 가이드·액자가 꺼지고 원본 이미지로 교체된 뒤 useEffect에서 추출
   };
 
   const handlePreview = () => {
@@ -87,11 +90,11 @@ export default function Editor() {
     };
   }, [capturing, widthMm, heightMm, bleedMm]);
 
-  // 가이드(회색 bleed·재단선·안전선)와 액자가 화면에서 사라진 프레임에서만 추출한다.
+  // 가이드(회색 bleed·재단선·안전선)와 액자가 화면에서 사라지고, 배치된 사진이
+  // 편집용 다운스케일 이미지 대신 고화질 원본으로 교체된 프레임에서만 추출한다.
   useEffect(() => {
-    if (!pending) return;
+    if (!pending || !originalsReady) return;
     const stage = stageRef.current;
-    // TODO(1차 내): 추출 직전 src → originalKey 원본으로 교체 렌더링 (기획안 v2 §10)
     // Konva batchDraw가 반영되도록 두 프레임 대기
     let inner = 0;
     const outer = requestAnimationFrame(() => {
@@ -123,7 +126,7 @@ export default function Editor() {
       cancelAnimationFrame(outer);
       cancelAnimationFrame(inner);
     };
-  }, [pending, widthMm, heightMm, bleedMm]);
+  }, [pending, originalsReady, widthMm, heightMm, bleedMm]);
 
   const libraryPanel = <LibraryPanel placingId={placingId} onPlacingChange={setPlacingId} />;
 
@@ -172,6 +175,8 @@ export default function Editor() {
             mode={pending || capturing ? 'export' : 'edit'}
             placingId={placingId}
             onPlaced={() => setPlacingId(null)}
+            useOriginals={pending !== null}
+            onOriginalsReady={() => setOriginalsReady(true)}
           />
         </main>
 

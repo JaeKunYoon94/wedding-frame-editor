@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(npx next *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3111/editor)",
+      "Bash(npm init *)",
+      "Bash(npm install *)",
+      "Bash(node drive.js)",
+      "Bash(node export-test.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3111 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }; Start-Sleep -Seconds 2; \"port 3111 cleared\")",
+      "Bash(node final-test.js)",
+      "Bash(python -)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3112/editor)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3112 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }; Start-Sleep -Seconds 1; \"cleared\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3113/editor)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3113 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }; \"stopped\")",
+      "Bash(node verify2.js)",
+      "Bash(git restore *)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npx eslint src/components/canvas/PaperCanvas.tsx src/components/panels/SettingsPanel.tsx src/components/Editor.tsx src/stores/editorStore.ts src/types/index.ts 2>&1)",
+      "PowerShell(npm run lint 2>&1)",
+      "Bash(git push *)"
+    ]
+  }
+}

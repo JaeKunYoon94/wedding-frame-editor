@@ -1,15 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Stage, Layer, Rect, Group, Image as KImage, Line, Circle } from 'react-konva';
+import { Stage, Layer, Rect, Group, Image as KImage, Line, Circle, Text as KText } from 'react-konva';
 import Konva from 'konva';
 import useImage from 'use-image';
 import { useEditorStore } from '@/stores/editorStore';
 import { useFrameStore } from '@/stores/frameStore';
 import { mmToScreenPx, screenPxToMm } from '@/lib/convertMM';
 import { framePaddingMm, getFrameSample } from '@/lib/frames';
+import { loadOriginal } from '@/lib/storage';
 import FramePreview from './FramePreview';
-import type { LayoutCell, Photo, PhotoFrame } from '@/types';
+import type { LayoutCell, Photo, PhotoFrame, TextBox } from '@/types';
 
 /**
  * 기획안 v2 §5·§6·§9.
@@ -247,6 +248,10 @@ function PhotoInCell({
   onDragHoverChange: (cellId: string | null) => void;
 }) {
   const [img] = useImage(photo.src, 'anonymous');
+  // 흑백은 Konva 필터+cache(고정 해상도 비트맵) 대신, 로드된 이미지의 원본 해상도 그대로
+  // 캔버스에 재드로잉해 변환한다. cache 방식은 pixelRatio 상한에 걸리면 확대·출력 시
+  // 컬러 사진보다 화질이 떨어지므로, 원본 픽셀 수를 그대로 보존하는 이 방식을 쓴다.
+  const [grayscaleImg, setGrayscaleImg] = useState<HTMLCanvasElement | undefined>(undefined);
   const { select, nudgePhotoInCell, removePhoto, movePhotoToCell } = useEditorStore();
   const dragOrigin = useRef<{ x: number; y: number } | null>(null);
   const imgRef = useRef<Konva.Image>(null);
@@ -275,14 +280,22 @@ function PhotoInCell({
     if (stage) stage.container().style.cursor = cursor;
   };
 
-  // 흑백 필터는 캐시된 비트맵에 적용되므로, 겉모습에 영향을 주는 값이 바뀔 때마다 다시 캐시한다
+  // 흑백 변환: 로드된 이미지(편집 중엔 다운스케일본, 추출 직전엔 원본으로 교체됨)의
+  // 실제 픽셀 크기 그대로 오프스크린 캔버스에 옮겨 그레이스케일화한다.
   useEffect(() => {
-    const node = imgRef.current;
-    if (!node || !img) return;
-    if (photo.grayscale) node.cache();
-    else node.clearCache();
-    node.getLayer()?.batchDraw();
-  }, [photo.grayscale, img, pw, ph, photo.offsetX, photo.offsetY, photo.rotation, photo.scaleX, photo.scaleY]);
+    if (!img || !photo.grayscale) {
+      setGrayscaleImg(undefined);
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.filter = 'grayscale(1)';
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    setGrayscaleImg(canvas);
+  }, [img, photo.grayscale]);
 
   // 데스크탑은 hover, 모바일은 선택(탭) 시 노출
   const showDelete = interactive && (hovered || selected);
@@ -303,7 +316,7 @@ function PhotoInCell({
     >
       <KImage
         ref={imgRef}
-        image={img}
+        image={photo.grayscale ? grayscaleImg : img}
         x={cw / 2 + mmToScreenPx(photo.offsetX, scale)}
         y={ch / 2 + mmToScreenPx(photo.offsetY, scale)}
         offsetX={pw / 2}
@@ -313,7 +326,6 @@ function PhotoInCell({
         rotation={photo.rotation}
         scaleX={photo.scaleX}
         scaleY={photo.scaleY}
-        filters={photo.grayscale ? [Konva.Filters.Grayscale] : []}
         draggable={draggable}
         onMouseEnter={(e) => interactive && setCursor(e.target, 'move')}
         onMouseLeave={(e) => interactive && setCursor(e.target, 'default')}
@@ -436,17 +448,140 @@ function PhotoInCell({
   );
 }
 
+/**
+ * 용지 위에 자유 배치하는 텍스트박스. 슬롯에 묶이지 않고 어디로든 드래그할 수 있다.
+ * 실제 문구 편집은 설정 패널의 입력창에서 하고, 캔버스에서는 위치·선택만 다룬다.
+ */
+function TextBoxNode({
+  textBox,
+  scale,
+  selected,
+  interactive,
+  draggable,
+  paperWmm,
+  paperHmm,
+  deleteBadgeR,
+  onSelect,
+}: {
+  textBox: TextBox;
+  scale: number;
+  selected: boolean;
+  interactive: boolean;
+  draggable: boolean;
+  paperWmm: number;
+  paperHmm: number;
+  deleteBadgeR: number;
+  onSelect: () => void;
+}) {
+  const { updateText, removeText } = useEditorStore();
+  const textRef = useRef<Konva.Text>(null);
+  const [hovered, setHovered] = useState(false);
+  const [boxHeight, setBoxHeight] = useState(0);
+
+  const tw = mmToScreenPx(textBox.width, scale);
+  const fontSizePx = mmToScreenPx(textBox.fontSizeMm, scale);
+
+  useEffect(() => {
+    setBoxHeight(textRef.current?.height() ?? fontSizePx * 1.4);
+  }, [textBox.text, textBox.width, fontSizePx]);
+
+  const setCursor = (node: Konva.Node, cursor: string) => {
+    const stage = node.getStage();
+    if (stage) stage.container().style.cursor = cursor;
+  };
+
+  const showDelete = interactive && (hovered || selected);
+
+  return (
+    <Group
+      x={mmToScreenPx(textBox.x, scale)}
+      y={mmToScreenPx(textBox.y, scale)}
+      rotation={textBox.rotation}
+      draggable={draggable}
+      onClick={onSelect}
+      onTap={onSelect}
+      onMouseEnter={(e) => {
+        setHovered(true);
+        if (interactive) setCursor(e.target, 'move');
+      }}
+      onMouseLeave={(e) => {
+        setHovered(false);
+        if (interactive) setCursor(e.target, 'default');
+      }}
+      onDragEnd={(e) => {
+        const xMm = screenPxToMm(e.target.x(), scale);
+        const yMm = screenPxToMm(e.target.y(), scale);
+        updateText(textBox.id, {
+          x: Math.max(0, Math.min(paperWmm - 10, xMm)),
+          y: Math.max(0, Math.min(paperHmm - 10, yMm)),
+        });
+      }}
+    >
+      <KText
+        ref={textRef}
+        text={textBox.text}
+        width={tw}
+        fontSize={fontSizePx}
+        fontStyle={textBox.bold ? 'bold' : 'normal'}
+        fill={textBox.color}
+        align={textBox.align}
+        wrap="word"
+      />
+
+      {interactive && selected && (
+        <Rect
+          x={-4}
+          y={-4}
+          width={tw + 8}
+          height={boxHeight + 8}
+          stroke="#9d7a54"
+          strokeWidth={2}
+          listening={false}
+        />
+      )}
+
+      {showDelete && (
+        <Group
+          x={tw - deleteBadgeR + 6}
+          y={-deleteBadgeR - 6}
+          onMouseEnter={(e) => setCursor(e.target, 'pointer')}
+          onMouseLeave={(e) => setCursor(e.target, 'default')}
+          onClick={(e) => {
+            e.cancelBubble = true;
+            setCursor(e.target, 'default');
+            removeText(textBox.id);
+          }}
+          onTap={(e) => {
+            e.cancelBubble = true;
+            removeText(textBox.id);
+          }}
+        >
+          <Circle radius={deleteBadgeR} fill="rgba(24,24,27,0.72)" stroke="#ffffff" strokeWidth={1.5} />
+          <Line points={[-5, -5, 5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
+          <Line points={[5, -5, -5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
+        </Group>
+      )}
+    </Group>
+  );
+}
+
 export default function PaperCanvas({
   stageOut,
   mode = 'edit',
   placingId = null,
   onPlaced,
+  useOriginals = false,
+  onOriginalsReady,
 }: {
   stageOut?: React.MutableRefObject<Konva.Stage | null>;
   mode?: 'edit' | 'export';
   /** 모바일 탭-투-배치: 라이브러리에서 고른 사진 id (드래그가 불가능한 터치 환경용) */
   placingId?: string | null;
   onPlaced?: () => void;
+  /** true면 배치된 사진을 편집용 다운스케일 이미지 대신 IndexedDB의 고화질 원본으로 교체해 렌더링한다 */
+  useOriginals?: boolean;
+  /** 원본 교체가 끝나 캡처해도 되는 시점을 알린다 */
+  onOriginalsReady?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -458,6 +593,9 @@ export default function PaperCanvas({
   const [pinching, setPinching] = useState(false);
   /** 배치된 사진을 드래그해 다른 슬롯 위로 올렸을 때 하이라이트할 슬롯 id */
   const [dragHoverCellId, setDragHoverCellId] = useState<string | null>(null);
+  /** useOriginals일 때 photoId → 원본 blob의 object URL */
+  const [originalSrcMap, setOriginalSrcMap] = useState<Record<string, string>>({});
+  const originalUrlsRef = useRef<string[]>([]);
   const pinchDist = useRef(0);
   const {
     widthMm,
@@ -471,6 +609,10 @@ export default function PaperCanvas({
     removePhoto,
     assignToCell,
     zoomPhotoInCell,
+    texts,
+    selectedTextId,
+    selectText,
+    removeText,
   } = useEditorStore();
   const { frame, matWidthMm, matColor } = useFrameStore();
 
@@ -509,15 +651,58 @@ export default function PaperCanvas({
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
+  // 다운로드 직전: 배치된 사진을 편집용 다운스케일 이미지 대신 IndexedDB의 고화질 원본으로 교체한다.
+  useEffect(() => {
+    if (!useOriginals) {
+      if (originalUrlsRef.current.length) {
+        originalUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+        originalUrlsRef.current = [];
+      }
+      setOriginalSrcMap({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        photos.map(async (p): Promise<[string, string]> => {
+          try {
+            const blob = await loadOriginal(p.originalKey);
+            if (!blob) return [p.id, p.src];
+            const url = URL.createObjectURL(blob);
+            originalUrlsRef.current.push(url);
+            return [p.id, url];
+          } catch {
+            return [p.id, p.src];
+          }
+        }),
+      );
+      if (cancelled) return;
+      setOriginalSrcMap(Object.fromEntries(entries));
+      onOriginalsReady?.();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [useOriginals, photos, onOriginalsReady]);
+
   // Delete / ESC 키 (기획안 v2 §8)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') select(null);
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) removePhoto(selectedId);
+      // 텍스트 편집창 등 입력 요소에 포커스가 있을 때는 사진/텍스트박스 삭제로 새지 않게 한다
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'Escape') {
+        select(null);
+        selectText(null);
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedId) removePhoto(selectedId);
+        if (selectedTextId) removeText(selectedTextId);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, select, removePhoto]);
+  }, [selectedId, selectedTextId, select, selectText, removePhoto, removeText]);
 
   const stageW = mmToScreenPx(outerW, scale);
   const stageH = mmToScreenPx(outerH, scale);
@@ -641,13 +826,15 @@ export default function PaperCanvas({
             <Group x={bleedPx} y={bleedPx}>
               {cells.map((cell) => {
                 const photo = photos.find((p) => p.cellId === cell.id);
-                return photo ? (
+                const renderPhoto =
+                  photo && originalSrcMap[photo.id] ? { ...photo, src: originalSrcMap[photo.id] } : photo;
+                return renderPhoto ? (
                   <PhotoInCell
                     key={cell.id}
-                    photo={photo}
+                    photo={renderPhoto}
                     cell={cell}
                     scale={scale}
-                    selected={photo.id === selectedId}
+                    selected={renderPhoto.id === selectedId}
                     interactive={isEdit}
                     draggable={isEdit && !pinching}
                     onCellTap={() => handleCellTap(cell.id)}
@@ -700,6 +887,24 @@ export default function PaperCanvas({
                     />
                   ) : null;
                 })()}
+            </Group>
+
+            {/* 자유 배치 텍스트 (재단선 원점 기준) */}
+            <Group x={bleedPx} y={bleedPx}>
+              {texts.map((t) => (
+                <TextBoxNode
+                  key={t.id}
+                  textBox={t}
+                  scale={scale}
+                  selected={t.id === selectedTextId}
+                  interactive={isEdit}
+                  draggable={isEdit && !pinching}
+                  paperWmm={widthMm}
+                  paperHmm={heightMm}
+                  deleteBadgeR={isMobile ? DELETE_BADGE_R_MOBILE : DELETE_BADGE_R}
+                  onSelect={() => selectText(t.id)}
+                />
+              ))}
             </Group>
 
             {isEdit && (
