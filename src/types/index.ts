@@ -9,7 +9,8 @@ export type SingleShape = "square" | "rect";
 /** 사진 테두리 디자인 (출력물에도 반영됨) */
 export type PhotoFrame = "none" | "polaroid" | "life4cut";
 export type BleedMm = 0 | 3 | 5;
-export type GutterMm = 0 | 2 | 5;
+/** 슬롯 간격(mm) — 용지 크기에 비례한 프리셋으로 선택 */
+export type GutterMm = number;
 
 /** 재단선 안쪽 상하좌우 여백(mm) — 변마다 독립적으로 조절 가능 */
 export interface Margins {
@@ -66,6 +67,8 @@ export interface Photo {
   brightness: number;
   contrast: number;
   saturation: number;
+  /** 흑백 변환 여부 */
+  grayscale: boolean;
 
   zIndex: number;
   cellId?: string;

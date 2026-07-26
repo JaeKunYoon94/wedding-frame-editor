@@ -2,9 +2,17 @@
 
 import { useState } from 'react';
 import { PAPER_SIZES } from '@/lib/paperSizes';
-import { maxMarginFor, maxMarginForSide, useEditorStore, type MarginSide } from '@/stores/editorStore';
+import {
+  defaultGutterFor,
+  defaultMarginFor,
+  maxGutterFor,
+  maxMarginFor,
+  maxMarginForSide,
+  useEditorStore,
+  type MarginSide,
+} from '@/stores/editorStore';
 import { LAYOUT_COUNTS } from '@/lib/layoutCalc';
-import type { BleedMm, GutterMm } from '@/types';
+import type { BleedMm } from '@/types';
 
 const MARGIN_SIDE_LABELS: Record<MarginSide, string> = {
   top: '위',
@@ -24,6 +32,28 @@ const MOCKUP_PREVIEW_ENABLED = false;
  * (렌더링·스토어 코드는 그대로 유지 — true로 바꾸면 다시 노출)
  */
 const PHOTO_FRAME_ENABLED = false;
+
+/**
+ * 여백 프리셋은 용지 크기에 비례해 생성한다.
+ * 권장값(A4 기준 30mm)을 중심으로 0 ~ 권장×5/3 구간 — A4에서는 [0,10,20,30,40,50].
+ */
+function marginPresets(widthMm: number, heightMm: number): number[] {
+  const base = defaultMarginFor(widthMm, heightMm);
+  const max = maxMarginFor(widthMm, heightMm);
+  const steps = [0, 1 / 3, 2 / 3, 1, 4 / 3, 5 / 3].map((r) => Math.round(base * r));
+  return [...new Set(steps)].filter((m) => m <= max);
+}
+
+/**
+ * 간격 프리셋도 용지 크기에 비례해 생성한다.
+ * 권장값(A4 기준 2mm) 기준 — A4에서는 [0, 2, 5, 10].
+ */
+function gutterPresets(widthMm: number, heightMm: number): number[] {
+  const base = defaultGutterFor(widthMm, heightMm);
+  const max = maxGutterFor(widthMm, heightMm);
+  const steps = [0, 1, 2.5, 5].map((r) => Math.round(base * r));
+  return [...new Set(steps)].filter((g) => g <= max);
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -60,21 +90,15 @@ function Chip({
 export default function SettingsPanel({
   onExport,
   onPreview,
-  includeBleed,
-  onIncludeBleedChange,
   exporting = false,
 }: {
   onExport: (format: 'png' | 'jpg' | 'pdf') => void;
   onPreview: () => void;
-  includeBleed: boolean;
-  onIncludeBleedChange: (v: boolean) => void;
   exporting?: boolean;
 }) {
   const s = useEditorStore();
   const [marginLinked, setMarginLinked] = useState(true);
 
-  const pageWmm = includeBleed ? s.widthMm + s.bleedMm * 2 : s.widthMm;
-  const pageHmm = includeBleed ? s.heightMm + s.bleedMm * 2 : s.heightMm;
   const hasPhotos = s.photos.length > 0;
 
   return (
@@ -120,13 +144,28 @@ export default function SettingsPanel({
           <p className="mt-1 text-xs text-stone-400">슬롯은 정사각형입니다.</p>
         )}
 
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-stone-500">간격</span>
-          {([0, 2, 5] as GutterMm[]).map((g) => (
-            <Chip key={g} active={s.gutterMm === g} onClick={() => s.setGutter(g)}>
-              {g}mm
-            </Chip>
-          ))}
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs text-stone-500">간격</span>
+            <span className="text-xs font-medium text-stone-700">{s.gutterMm}mm</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={maxGutterFor(s.widthMm, s.heightMm)}
+            step={1}
+            value={s.gutterMm}
+            onChange={(e) => s.setGutter(Number(e.target.value))}
+            className="w-full accent-accent"
+            aria-label="슬롯 간격 mm"
+          />
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {gutterPresets(s.widthMm, s.heightMm).map((g) => (
+              <Chip key={g} active={s.gutterMm === g} onClick={() => s.setGutter(g)}>
+                {g}mm
+              </Chip>
+            ))}
+          </div>
         </div>
 
         <div className="mt-3">
@@ -153,9 +192,7 @@ export default function SettingsPanel({
                 aria-label="상하좌우 여백 mm"
               />
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {[0, 8, 12, 20, 30, 50]
-                  .filter((m) => m <= maxMarginFor(s.widthMm, s.heightMm))
-                  .map((m) => (
+                {marginPresets(s.widthMm, s.heightMm).map((m) => (
                     <Chip
                       key={m}
                       active={s.margins.top === m && s.margins.right === m && s.margins.bottom === m && s.margins.left === m}
@@ -230,6 +267,12 @@ export default function SettingsPanel({
         </Section>
       )}
 
+      {s.selectedId && (
+        <Section title="필터">
+          <PhotoFilterTools />
+        </Section>
+      )}
+
       {MOCKUP_PREVIEW_ENABLED && (
         <Section title="미리보기">
           <button
@@ -267,17 +310,8 @@ export default function SettingsPanel({
             JPG
           </button>
         </div>
-        <label className="mt-2 flex items-center gap-1.5 text-xs text-stone-600">
-          <input
-            type="checkbox"
-            checked={includeBleed}
-            onChange={(e) => onIncludeBleedChange(e.target.checked)}
-          />
-          인쇄소 제출용 (재단 여백 {s.bleedMm}mm 포함)
-        </label>
         <p className="mt-1.5 text-xs text-stone-400">
-          출력 크기 {pageWmm}×{pageHmm}mm · sRGB 기반 인쇄 파일입니다.
-          {!includeBleed && ' 가정용 프린터는 이 상태로 출력하세요.'}
+          출력 크기 {s.widthMm}×{s.heightMm}mm · sRGB 기반 인쇄 파일입니다.
         </p>
       </Section>
     </div>
@@ -317,6 +351,19 @@ function PhotoTools() {
       <button className="rounded border border-red-200 px-2 py-1 text-red-600" onClick={() => removePhoto(photo.id)}>
         삭제
       </button>
+    </div>
+  );
+}
+
+function PhotoFilterTools() {
+  const { selectedId, photos, updatePhoto } = useEditorStore();
+  const photo = photos.find((p) => p.id === selectedId);
+  if (!photo) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 text-sm">
+      <Chip active={photo.grayscale} onClick={() => updatePhoto(photo.id, { grayscale: !photo.grayscale })}>
+        흑백
+      </Chip>
     </div>
   );
 }

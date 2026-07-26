@@ -24,8 +24,6 @@ const MOBILE_TABS: Array<[Exclude<MobileTab, null>, string]> = [
 export default function Editor() {
   const stageRef = useRef<Konva.Stage | null>(null);
   const [tab, setTab] = useState<MobileTab>(null);
-  /** 인쇄소 제출용: 재단 여백(bleed)까지 페이지에 포함 (기본은 용지 실측 그대로) */
-  const [includeBleed, setIncludeBleed] = useState(false);
   const [pending, setPending] = useState<ExportFormat | null>(null);
   /** 목업 미리보기: 캡처 중 여부 + 캡처된 인쇄물 dataURL */
   const [capturing, setCapturing] = useState(false);
@@ -103,22 +101,16 @@ export default function Editor() {
           // export 모드의 stage 폭(px) = (용지 + bleed×2)mm 이므로 역산하면 px/mm 배율
           const scale = stage.width() / (widthMm + bleedMm * 2);
           const bleedPx = bleedMm * scale;
-          const spec = includeBleed
-            ? {
-                pageWmm: widthMm + bleedMm * 2,
-                pageHmm: heightMm + bleedMm * 2,
-                crop: { x: 0, y: 0, width: stage.width(), height: stage.height() },
-              }
-            : {
-                pageWmm: widthMm,
-                pageHmm: heightMm,
-                crop: {
-                  x: bleedPx,
-                  y: bleedPx,
-                  width: widthMm * scale,
-                  height: heightMm * scale,
-                },
-              };
+          const spec = {
+            pageWmm: widthMm,
+            pageHmm: heightMm,
+            crop: {
+              x: bleedPx,
+              y: bleedPx,
+              width: widthMm * scale,
+              height: heightMm * scale,
+            },
+          };
           const name = `wedding-frame-${widthMm}x${heightMm}`;
           if (pending === 'pdf') exportStageToPdf(stage, spec, `${name}.pdf`);
           else exportStageToImage(stage, spec, pending, `${name}.${pending}`);
@@ -131,7 +123,7 @@ export default function Editor() {
       cancelAnimationFrame(outer);
       cancelAnimationFrame(inner);
     };
-  }, [pending, widthMm, heightMm, bleedMm, includeBleed]);
+  }, [pending, widthMm, heightMm, bleedMm]);
 
   const libraryPanel = <LibraryPanel placingId={placingId} onPlacingChange={setPlacingId} />;
 
@@ -139,8 +131,6 @@ export default function Editor() {
     <SettingsPanel
       onExport={handleExport}
       onPreview={handlePreview}
-      includeBleed={includeBleed}
-      onIncludeBleedChange={setIncludeBleed}
       exporting={pending !== null || capturing}
     />
   );

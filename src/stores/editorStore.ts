@@ -68,6 +68,8 @@ interface EditorState {
   setPhotoFrame: (frame: PhotoFrame) => void;
   addLibraryItems: (items: LibraryItem[]) => void;
   assignToCell: (libraryId: string, cellId: string) => void;
+  /** 배치된 사진을 다른 슬롯으로 이동(대상에 사진이 있으면 서로 교환) */
+  movePhotoToCell: (photoId: string, targetCellId: string) => void;
   updatePhoto: (id: string, patch: Partial<Photo>) => void;
   nudgePhotoInCell: (id: string, dxMm: number, dyMm: number) => void;
   zoomPhotoInCell: (id: string, factor: number) => void;
@@ -106,16 +108,34 @@ function refitPhotos(cells: LayoutCell[], photos: Photo[]): Photo[] {
   });
 }
 
-/** 웨딩 사진 기본값: 재단선 안쪽에 넉넉한 흰 여백 (네 변 동일) */
-const DEFAULT_MARGIN_MM = 12;
-export const MARGIN_MAX_MM = 50;
+/** 기본 여백은 용지 크기에 비례: A4(짧은 변 210mm) 기준 30mm */
+const MARGIN_RATIO = 30 / 210;
 /** 여백을 아무리 늘려도 슬롯이 사라지지 않도록 남겨두는 최소 콘텐츠 영역(mm) */
 const MIN_CONTENT_MM = 20;
 
+/** 용지별 권장 기본 여백(mm) — 짧은 변 × (30/210) */
+export function defaultMarginFor(widthMm: number, heightMm: number): number {
+  return Math.round(Math.min(widthMm, heightMm) * MARGIN_RATIO);
+}
+
+/** 기본 간격도 용지 크기에 비례: A4(짧은 변 210mm) 기준 2mm */
+const GUTTER_RATIO = 2 / 210;
+
+/** 용지별 권장 기본 간격(mm) — 짧은 변 × (2/210) */
+export function defaultGutterFor(widthMm: number, heightMm: number): number {
+  return Math.round(Math.min(widthMm, heightMm) * GUTTER_RATIO);
+}
+
+/** 간격 슬라이더 상한도 용지 크기에 비례: A4 기준 20mm */
+const GUTTER_MAX_RATIO = 20 / 210;
+
+export function maxGutterFor(widthMm: number, heightMm: number): number {
+  return Math.round(Math.min(widthMm, heightMm) * GUTTER_MAX_RATIO);
+}
+
 /** "네 변 동일" 프리셋용 상한 — 상+하, 좌+우가 동시에 늘어나도 콘텐츠 영역이 남도록 제한 */
 export function maxMarginFor(widthMm: number, heightMm: number): number {
-  const byPaper = Math.floor((Math.min(widthMm, heightMm) - MIN_CONTENT_MM) / 2);
-  return Math.max(0, Math.min(MARGIN_MAX_MM, byPaper));
+  return Math.max(0, Math.floor((Math.min(widthMm, heightMm) - MIN_CONTENT_MM) / 2));
 }
 
 /** 특정 한 변의 여백 상한 — 마주보는 변 값을 고려해 콘텐츠 영역이 음수가 되지 않게 제한 */
@@ -129,10 +149,12 @@ export function maxMarginForSide(widthMm: number, heightMm: number, side: Margin
     : side === 'left'
       ? margins.right
       : margins.left;
-  return Math.max(0, Math.min(MARGIN_MAX_MM, Math.floor(dimension - MIN_CONTENT_MM - opposite)));
+  return Math.max(0, Math.floor(dimension - MIN_CONTENT_MM - opposite));
 }
 
 const initialPaper = getPaperSize(DEFAULT_PAPER_ID) ?? PAPER_SIZES[0]; // A4 세로
+const INITIAL_MARGIN_MM = defaultMarginFor(initialPaper.widthMm, initialPaper.heightMm); // A4 → 30mm
+const INITIAL_GUTTER_MM = defaultGutterFor(initialPaper.widthMm, initialPaper.heightMm); // A4 → 2mm
 
 export const useEditorStore = create<EditorState>()(
   temporal(
@@ -145,12 +167,12 @@ export const useEditorStore = create<EditorState>()(
 
       layoutMode: 'grid',
       layoutType: 1,
-      gutterMm: 2,
+      gutterMm: INITIAL_GUTTER_MM,
       margins: {
-        top: DEFAULT_MARGIN_MM,
-        right: DEFAULT_MARGIN_MM,
-        bottom: DEFAULT_MARGIN_MM,
-        left: DEFAULT_MARGIN_MM,
+        top: INITIAL_MARGIN_MM,
+        right: INITIAL_MARGIN_MM,
+        bottom: INITIAL_MARGIN_MM,
+        left: INITIAL_MARGIN_MM,
       },
       singleShape: 'rect',
       photoFrame: 'none',
@@ -159,8 +181,8 @@ export const useEditorStore = create<EditorState>()(
         initialPaper.heightMm,
         1,
         'portrait',
-        2,
-        { top: DEFAULT_MARGIN_MM, right: DEFAULT_MARGIN_MM, bottom: DEFAULT_MARGIN_MM, left: DEFAULT_MARGIN_MM },
+        INITIAL_GUTTER_MM,
+        { top: INITIAL_MARGIN_MM, right: INITIAL_MARGIN_MM, bottom: INITIAL_MARGIN_MM, left: INITIAL_MARGIN_MM },
         'rect',
       ),
 
@@ -177,14 +199,21 @@ export const useEditorStore = create<EditorState>()(
         const widthMm = orientation === 'portrait' ? base.widthMm : base.heightMm;
         const heightMm = orientation === 'portrait' ? base.heightMm : base.widthMm;
         set((s) => {
-          // 변마다 상한을 재계산해 새 용지에서도 콘텐츠 영역이 남도록 클램프
-          const clampSide = (side: MarginSide, value: number, m: Margins) =>
-            Math.min(value, maxMarginForSide(widthMm, heightMm, side, m));
+          // 여백·간격은 용지 크기에 비례해 유지: 짧은 변 비율만큼 스케일 (A4 30mm → A2 60mm)
+          const scale = Math.min(widthMm, heightMm) / Math.min(s.widthMm, s.heightMm);
+          const gutterMm = Math.min(maxGutterFor(widthMm, heightMm), Math.round(s.gutterMm * scale));
           let margins = { ...s.margins };
           (Object.keys(margins) as MarginSide[]).forEach((side) => {
-            margins = { ...margins, [side]: clampSide(side, margins[side], margins) };
+            margins = { ...margins, [side]: Math.round(margins[side] * scale) };
           });
-          const next = { ...s, paperId: id, widthMm, heightMm, margins };
+          // 변마다 상한을 재계산해 새 용지에서도 콘텐츠 영역이 남도록 클램프
+          (Object.keys(margins) as MarginSide[]).forEach((side) => {
+            margins = {
+              ...margins,
+              [side]: Math.min(margins[side], maxMarginForSide(widthMm, heightMm, side, margins)),
+            };
+          });
+          const next = { ...s, paperId: id, widthMm, heightMm, margins, gutterMm };
           return { ...next, cells: deriveCells(next), photos: [] , selectedId: null };
         });
       },
@@ -204,8 +233,9 @@ export const useEditorStore = create<EditorState>()(
           return { ...next, cells: deriveCells(next), photos: [], selectedId: null };
         }),
 
-      setGutter: (gutterMm) =>
+      setGutter: (mm) =>
         set((s) => {
+          const gutterMm = Math.max(0, Math.min(maxGutterFor(s.widthMm, s.heightMm), Math.round(mm)));
           const next = { ...s, gutterMm };
           const cells = deriveCells(next);
           // 셀 구성은 그대로이므로 배치된 사진은 유지하고 새 크기에 다시 맞춘다
@@ -269,12 +299,39 @@ export const useEditorStore = create<EditorState>()(
           brightness: 0,
           contrast: 0,
           saturation: 0,
+          grayscale: false,
           zIndex: photos.length,
           cellId,
         };
         set({
           photos: [...photos.filter((p) => p.cellId !== cellId), photo],
           selectedId: photo.id,
+        });
+      },
+
+      /**
+       * 용지 안에서 배치된 사진을 다른 슬롯으로 드래그 이동.
+       * 대상 슬롯에 이미 사진이 있으면 서로 자리를 맞바꾼다.
+       * 한 레이아웃의 슬롯은 모두 같은 크기이므로 zoom·offset은 그대로 유지해도 된다.
+       */
+      movePhotoToCell: (photoId, targetCellId) => {
+        const { photos, cells } = get();
+        const source = photos.find((p) => p.id === photoId);
+        const targetCell = cells.find((c) => c.id === targetCellId);
+        if (!source || !targetCell || source.cellId === targetCellId) return;
+        const sourceCell = cells.find((c) => c.id === source.cellId);
+        const occupant = photos.find((p) => p.cellId === targetCellId);
+        set({
+          photos: photos.map((p) => {
+            if (p.id === source.id) {
+              return { ...p, cellId: targetCellId, x: targetCell.x, y: targetCell.y };
+            }
+            if (sourceCell && occupant && p.id === occupant.id) {
+              return { ...p, cellId: sourceCell.id, x: sourceCell.x, y: sourceCell.y };
+            }
+            return p;
+          }),
+          selectedId: source.id,
         });
       },
 
