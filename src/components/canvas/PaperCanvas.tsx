@@ -224,6 +224,7 @@ function PhotoInCell({
   isMobile,
   resolveCellAtStagePoint,
   onDragHoverChange,
+  onReadyChange,
 }: {
   photo: Photo;
   cell: LayoutCell;
@@ -246,6 +247,8 @@ function PhotoInCell({
   resolveCellAtStagePoint: (x: number, y: number) => LayoutCell | undefined;
   /** 드래그 중 대상 슬롯이 바뀔 때마다 호출 (하이라이트 표시용) */
   onDragHoverChange: (cellId: string | null) => void;
+  /** 이 슬롯의 이미지(흑백 변환 포함)가 실제로 그릴 준비가 됐는지 알림 (추출 캡처 타이밍용) */
+  onReadyChange?: (photoId: string, src: string, ready: boolean) => void;
 }) {
   const [img] = useImage(photo.src, 'anonymous');
   // 흑백은 Konva 필터+cache(고정 해상도 비트맵) 대신, 로드된 이미지의 원본 해상도 그대로
@@ -282,6 +285,9 @@ function PhotoInCell({
 
   // 흑백 변환: 로드된 이미지(편집 중엔 다운스케일본, 추출 직전엔 원본으로 교체됨)의
   // 실제 픽셀 크기 그대로 오프스크린 캔버스에 옮겨 그레이스케일화한다.
+  // ctx.filter='grayscale(1)'는 구형 Android WebView·삼성 인터넷 등 일부 모바일
+  // 브라우저에서 조용히 무시되어(그림은 그려지지만 색이 그대로 남음) 필터가 안 먹는
+  // 것처럼 보이므로, 어디서나 동작하는 픽셀 단위 휘도 변환으로 직접 처리한다.
   useEffect(() => {
     if (!img || !photo.grayscale) {
       setGrayscaleImg(undefined);
@@ -292,10 +298,27 @@ function PhotoInCell({
     canvas.height = img.naturalHeight || img.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.filter = 'grayscale(1)';
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      data[i] = gray;
+      data[i + 1] = gray;
+      data[i + 2] = gray;
+    }
+    ctx.putImageData(imageData, 0, 0);
     setGrayscaleImg(canvas);
   }, [img, photo.grayscale]);
+
+  // 추출(다운로드) 직전, 이 슬롯이 실제로 그릴 준비가 됐는지 부모에 알린다.
+  // 원본 교체 시 useImage는 src가 바뀌는 즉시 img를 undefined로 되돌리므로,
+  // 여기서 img(및 흑백이면 grayscaleImg)가 채워진 시점이 진짜 "로드 완료" 시점이다.
+  useEffect(() => {
+    if (!onReadyChange) return;
+    const ready = photo.grayscale ? !!grayscaleImg : !!img;
+    onReadyChange(photo.id, photo.src, ready);
+  }, [img, grayscaleImg, photo.grayscale, photo.id, photo.src, onReadyChange]);
 
   // 데스크탑은 hover, 모바일은 선택(탭) 시 노출
   const showDelete = interactive && (hovered || selected);
@@ -596,6 +619,12 @@ export default function PaperCanvas({
   /** useOriginals일 때 photoId → 원본 blob의 object URL */
   const [originalSrcMap, setOriginalSrcMap] = useState<Record<string, string>>({});
   const originalUrlsRef = useRef<string[]>([]);
+  /** "photoId::src" → 그 src의 이미지(흑백이면 변환본까지)가 실제로 그려질 준비가 됐는지 */
+  const [readyMap, setReadyMap] = useState<Record<string, boolean>>({});
+  const handlePhotoReadyChange = useCallback((photoId: string, src: string, ready: boolean) => {
+    const key = `${photoId}::${src}`;
+    setReadyMap((m) => (m[key] === ready ? m : { ...m, [key]: ready }));
+  }, []);
   const pinchDist = useRef(0);
   const {
     widthMm,
@@ -678,12 +707,22 @@ export default function PaperCanvas({
       );
       if (cancelled) return;
       setOriginalSrcMap(Object.fromEntries(entries));
-      onOriginalsReady?.();
     })();
     return () => {
       cancelled = true;
     };
-  }, [useOriginals, photos, onOriginalsReady]);
+  }, [useOriginals, photos]);
+
+  // 원본 src로 교체된 각 슬롯이 실제로(이미지 로드 + 흑백 변환까지) 그려질 준비가
+  // 됐을 때만 캡처를 허용한다. blob URL을 만든 시점(위 effect)에는 아직 <img>가
+  // 로드되지 않아, 그 시점에 바로 캡처하면 흰 용지만 찍히는 레이스 컨디션이 있었다.
+  useEffect(() => {
+    if (!useOriginals) return;
+    const allSwapped = photos.every((p) => originalSrcMap[p.id]);
+    if (!allSwapped) return;
+    const allReady = photos.every((p) => readyMap[`${p.id}::${originalSrcMap[p.id]}`]);
+    if (allReady) onOriginalsReady?.();
+  }, [useOriginals, photos, originalSrcMap, readyMap, onOriginalsReady]);
 
   // Delete / ESC 키 (기획안 v2 §8)
   useEffect(() => {
@@ -844,6 +883,7 @@ export default function PaperCanvas({
                     isMobile={isMobile}
                     resolveCellAtStagePoint={getCellAtStagePoint}
                     onDragHoverChange={setDragHoverCellId}
+                    onReadyChange={handlePhotoReadyChange}
                   />
                 ) : isEdit ? (
                   <Rect
