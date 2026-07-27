@@ -22,7 +22,14 @@
       "PowerShell(npx tsc --noEmit)",
       "PowerShell(npx eslint src/components/canvas/PaperCanvas.tsx src/components/panels/SettingsPanel.tsx src/components/Editor.tsx src/stores/editorStore.ts src/types/index.ts 2>&1)",
       "PowerShell(npm run lint 2>&1)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(mkdir -p 'C:\\\\Users\\\\윤재근\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-----OneDrive-Desktop-wedding-frame-editor-wedding-frame-editor\\\\c42b0ba3-400e-4186-aa8b-1ee71c915a48\\\\scratchpad/pw')",
+      "Bash(disown)",
+      "Bash(node -c 'C:\\\\Users\\\\윤재근\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-----OneDrive-Desktop-wedding-frame-editor-wedding-frame-editor\\\\c42b0ba3-400e-4186-aa8b-1ee71c915a48\\\\scratchpad/pw/desktop.js')",
+      "Bash(npx eslint *)",
+      "Bash(cd \"C:\\\\Users\\\\윤재근\\\\OneDrive\\\\Desktop\\\\wedding-frame-editor\\\\wedding-frame-editor\" && ls \"C:\\\\Users\\\\윤재근\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-----OneDrive-Desktop-wedding-frame-editor-wedding-frame-editor\\\\9493a7dd-5458-49ad-b7bf-60e809c16231\\\\scratchpad\" 2>/dev/null; find / -iname \"playwright-core\" -maxdepth 6 -type d 2>/dev/null)",
+      "Read(//c//**)",
+      "Bash(SCRATCH='C:\\\\Users\\\\윤재근\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-----OneDrive-Desktop-wedding-frame-editor-wedding-frame-editor\\\\c42b0ba3-400e-4186-aa8b-1ee71c915a48\\\\scratchpad' node desktop.js)"
     ]
   }
 }
