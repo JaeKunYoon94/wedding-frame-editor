@@ -80,8 +80,10 @@ git config core.hooksPath .githooks
 README가 수정되면 push가 중단됩니다. 내용을 확인하고 커밋한 뒤 다시 push하세요.
 건너뛰려면 `SKIP_README_AGENT=1 git push`.
 
-`.claude/agents/ui-ux-reviewer.md`는 UI 변경 후 실제 브라우저(Playwright)로 데스크탑·모바일
-화면을 조작해 레이아웃·터치 타겟·카피 일관성을 점검하는 서브에이전트다. 필요할 때 호출한다.
+`.claude/agents/qa-tester.md`는 기능 코드 변경 후 Playwright로 데스크탑·모바일에서
+실제 동작(클릭·드래그·탭, 콘솔 에러 유무)을 검증해 표로 보고하는 서브에이전트다.
+`.claude/agents/qa-fixer.md`는 qa-tester가 보고한 실패 항목을 받아 최소 diff로 수정하는 서브에이전트다.
+기능 코드 변경 후 qa-tester로 검증하고, ❌ 항목이 있으면 qa-fixer로 이어서 수정한다.
 
 `.claude/agents/security-reviewer.md`는 XSS·안전하지 않은 역직렬화·업로드 처리·개인정보(사진)
 유출 경로·의존성 위험을 이 앱의 위협 모델(서버 없음, 완전 클라이언트 사이드) 기준으로 점검하는
