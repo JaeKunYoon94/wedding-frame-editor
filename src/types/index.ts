@@ -1,7 +1,6 @@
 /** 모든 좌표·크기는 mm 단위 (기획안 v2 §3: mm가 진실의 원천) */
 
 export type Orientation = "portrait" | "landscape";
-export type LayoutMode = "grid" | "free";
 export type LayoutType = 1 | 4 | 9 | 16; // 정사각형 슬롯 격자: 1×1 / 2×2 / 3×3 / 4×4
 /** 1장 레이아웃 슬롯 형태: 정사각형 / 용지 비율로 꽉 채운 직사각형 */
 export type SingleShape = "square" | "rect";
@@ -9,8 +8,6 @@ export type SingleShape = "square" | "rect";
 /** 사진 테두리 디자인 (출력물에도 반영됨) */
 export type PhotoFrame = "none" | "polaroid" | "life4cut";
 export type BleedMm = 0 | 3 | 5;
-/** 슬롯 간격(mm) — 용지 크기에 비례한 프리셋으로 선택 */
-export type GutterMm = number;
 
 /** 재단선 안쪽 상하좌우 여백(mm) — 변마다 독립적으로 조절 가능 */
 export interface Margins {

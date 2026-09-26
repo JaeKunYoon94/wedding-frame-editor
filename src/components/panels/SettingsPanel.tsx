@@ -1,6 +1,9 @@
 'use client';
 
+// 설정 패널: 용지·레이아웃·여백·bleed·선택 사진 도구·다운로드. 값은 editorStore(메모리)에만 있다. (텍스트 도구는 TEXT_ENABLED로 숨김)
+
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { PAPER_SIZES } from '@/lib/paperSizes';
 import {
   defaultGutterFor,
@@ -34,31 +37,31 @@ const MOCKUP_PREVIEW_ENABLED = false;
 const PHOTO_FRAME_ENABLED = false;
 
 /**
- * 여백 프리셋은 용지 크기에 비례해 생성한다.
- * 권장값(A4 기준 30mm)을 중심으로 0 ~ 권장×5/3 구간 — A4에서는 [0,10,20,30,40,50].
+ * 텍스트 추가 UI 노출 여부. 현재는 숨김 — 추가 버튼이 없으면 텍스트가 생기지 않으므로 캔버스에도 나타나지 않는다.
+ * (스토어·캔버스 렌더링 코드는 그대로 유지 — true로 바꾸면 다시 노출)
  */
-function marginPresets(widthMm: number, heightMm: number): number[] {
-  const base = defaultMarginFor(widthMm, heightMm);
-  const max = maxMarginFor(widthMm, heightMm);
-  const steps = [0, 1 / 3, 2 / 3, 1, 4 / 3, 5 / 3].map((r) => Math.round(base * r));
-  return [...new Set(steps)].filter((m) => m <= max);
-}
+const TEXT_ENABLED = false;
 
 /**
- * 간격 프리셋도 용지 크기에 비례해 생성한다.
- * 권장값(A4 기준 2mm) 기준 — A4에서는 [0, 2, 5, 10].
+ * 용지 크기에 비례한 프리셋: 권장값 × 배율을 반올림하고, 중복·상한 초과는 뺀다.
+ * - 여백: A4 권장 30mm × [0, 1/3 … 5/3] → [0,10,20,30,40,50]
+ * - 간격: A4 권장 2mm × [0, 1, 2.5, 5] → [0,2,5,10]
  */
-function gutterPresets(widthMm: number, heightMm: number): number[] {
-  const base = defaultGutterFor(widthMm, heightMm);
-  const max = maxGutterFor(widthMm, heightMm);
-  const steps = [0, 1, 2.5, 5].map((r) => Math.round(base * r));
-  return [...new Set(steps)].filter((g) => g <= max);
+function presets(base: number, max: number, ratios: number[]): number[] {
+  return [...new Set(ratios.map((r) => Math.round(base * r)))].filter((v) => v <= max);
 }
+const MARGIN_RATIOS = [0, 1 / 3, 2 / 3, 1, 4 / 3, 5 / 3];
+const GUTTER_RATIOS = [0, 1, 2.5, 5];
+
+// 사진·텍스트 도구 버튼 공통 스타일 (모바일 터치 타깃 44px)
+const TOOL_BTN =
+  'min-h-11 rounded-full border border-line px-3 py-1 transition-colors hover:border-accent hover:text-accent lg:min-h-8';
+const DANGER_BTN = 'min-h-11 rounded-full border border-red-200 px-3 py-1 text-red-700 hover:bg-red-50 lg:min-h-8';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="border-b border-stone-200 p-3">
-      <h3 className="mb-2 text-xs font-semibold tracking-wide text-stone-500">{title}</h3>
+    <section className="border-b border-line px-4 py-4">
+      <h3 className="mb-2.5 font-display text-sm text-ink">{title}</h3>
       {children}
     </section>
   );
@@ -76,10 +79,11 @@ function Chip({
   return (
     <button
       onClick={onClick}
-      className={`rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
-        active
-          ? 'border-accent bg-accent text-white'
-          : 'border-stone-300 bg-white text-stone-700 hover:border-stone-400'
+      aria-pressed={active}
+      // DESIGN.md configurator-option-chip: 흰 pill + 헤어라인. 선택 시 2px Focus Blue 테두리(1px border + 1px ring — 폭이 변해 글자가 밀리지 않게)
+      // 색만으로 상태를 구분하지 않도록 선택 시 굵기(600)도 함께 바꾼다. 모바일 터치 타깃 44px
+      className={`min-h-11 rounded-full border bg-sheet px-3.5 py-1.5 text-sm transition-colors lg:min-h-8 ${
+        active ? 'border-accent-focus font-semibold text-ink ring-1 ring-accent-focus' : 'border-line text-neutral-700 hover:border-neutral-400'
       }`}
     >
       {children}
@@ -96,10 +100,39 @@ export default function SettingsPanel({
   onPreview: () => void;
   exporting?: boolean;
 }) {
-  const s = useEditorStore();
-  const [marginLinked, setMarginLinked] = useState(true);
-
-  const hasPhotos = s.photos.length > 0;
+  // 사진 드래그·텍스트 입력처럼 잦은 변경에 패널 전체가 다시 렌더되지 않도록 쓰는 값만 구독
+  const s = useEditorStore(
+    useShallow((st) => ({
+      paperId: st.paperId,
+      widthMm: st.widthMm,
+      heightMm: st.heightMm,
+      orientation: st.orientation,
+      bleedMm: st.bleedMm,
+      layoutType: st.layoutType,
+      singleShape: st.singleShape,
+      gutterMm: st.gutterMm,
+      margins: st.margins,
+      photoFrame: st.photoFrame,
+      selectedId: st.selectedId,
+      selectedTextId: st.selectedTextId,
+      setPaper: st.setPaper,
+      toggleOrientation: st.toggleOrientation,
+      setLayout: st.setLayout,
+      setSingleShape: st.setSingleShape,
+      setGutter: st.setGutter,
+      setMargin: st.setMargin,
+      setMarginSide: st.setMarginSide,
+      setPhotoFrame: st.setPhotoFrame,
+      setBleed: st.setBleed,
+      addText: st.addText,
+    })),
+  );
+  const hasPhotos = useEditorStore((st) => st.photos.length > 0);
+  // 패널이 다시 마운트돼도(모바일 탭 전환) 현재 값이 네 변 동일이 아니면 '변마다 따로'로 연다
+  const [marginLinked, setMarginLinked] = useState(() => {
+    const m = s.margins;
+    return m.top === m.right && m.top === m.bottom && m.top === m.left;
+  });
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -132,7 +165,7 @@ export default function SettingsPanel({
 
         {s.layoutType === 1 ? (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-stone-500">사진 형태</span>
+            <span className="text-xs text-neutral-500">사진 형태</span>
             <Chip active={s.singleShape === 'rect'} onClick={() => s.setSingleShape('rect')}>
               용지 꽉 채움
             </Chip>
@@ -141,13 +174,13 @@ export default function SettingsPanel({
             </Chip>
           </div>
         ) : (
-          <p className="mt-1 text-xs text-stone-400">슬롯은 정사각형입니다.</p>
+          <p className="mt-1 text-xs text-neutral-500">슬롯은 정사각형입니다.</p>
         )}
 
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs text-stone-500">간격</span>
-            <span className="text-xs font-medium text-stone-700">{s.gutterMm}mm</span>
+            <span className="text-xs text-neutral-500">간격</span>
+            <span className="text-xs font-semibold text-neutral-700">{s.gutterMm}mm</span>
           </div>
           <input
             type="range"
@@ -160,7 +193,7 @@ export default function SettingsPanel({
             aria-label="슬롯 간격 mm"
           />
           <div className="mt-1 flex flex-wrap gap-1.5">
-            {gutterPresets(s.widthMm, s.heightMm).map((g) => (
+            {presets(defaultGutterFor(s.widthMm, s.heightMm), maxGutterFor(s.widthMm, s.heightMm), GUTTER_RATIOS).map((g) => (
               <Chip key={g} active={s.gutterMm === g} onClick={() => s.setGutter(g)}>
                 {g}mm
               </Chip>
@@ -169,14 +202,23 @@ export default function SettingsPanel({
         </div>
 
         <div className="mt-3">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs text-stone-500">상하좌우 여백</span>
-            <button
-              onClick={() => setMarginLinked((v) => !v)}
-              className="text-xs text-accent underline-offset-2 hover:underline"
-            >
-              {marginLinked ? '변마다 따로 조절' : '네 변 동일하게'}
-            </button>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="text-xs text-neutral-500">여백</span>
+            <div className="flex gap-1">
+              {/* 동일 모드로 돌아갈 땐 위쪽 값으로 네 변을 맞춰, 화면 표시와 실제 값이 어긋나지 않게 한다 */}
+              <Chip
+                active={marginLinked}
+                onClick={() => {
+                  if (!marginLinked) s.setMargin(s.margins.top);
+                  setMarginLinked(true);
+                }}
+              >
+                네 변 동일
+              </Chip>
+              <Chip active={!marginLinked} onClick={() => setMarginLinked(false)}>
+                변마다 따로
+              </Chip>
+            </div>
           </div>
 
           {marginLinked ? (
@@ -192,7 +234,7 @@ export default function SettingsPanel({
                 aria-label="상하좌우 여백 mm"
               />
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {marginPresets(s.widthMm, s.heightMm).map((m) => (
+                {presets(defaultMarginFor(s.widthMm, s.heightMm), maxMarginFor(s.widthMm, s.heightMm), MARGIN_RATIOS).map((m) => (
                     <Chip
                       key={m}
                       active={s.margins.top === m && s.margins.right === m && s.margins.bottom === m && s.margins.left === m}
@@ -204,28 +246,9 @@ export default function SettingsPanel({
               </div>
             </>
           ) : (
-            <div className="space-y-2">
-              {(['top', 'right', 'bottom', 'left'] as MarginSide[]).map((side) => (
-                <div key={side}>
-                  <div className="mb-0.5 flex items-center justify-between">
-                    <span className="text-xs text-stone-500">{MARGIN_SIDE_LABELS[side]}</span>
-                    <span className="text-xs font-medium text-stone-700">{s.margins[side]}mm</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={maxMarginForSide(s.widthMm, s.heightMm, side, s.margins)}
-                    step={1}
-                    value={s.margins[side]}
-                    onChange={(e) => s.setMarginSide(side, Number(e.target.value))}
-                    className="w-full accent-accent"
-                    aria-label={`${MARGIN_SIDE_LABELS[side]} 여백 mm`}
-                  />
-                </div>
-              ))}
-            </div>
+            <MarginSidesEditor />
           )}
-          <p className="mt-1 text-xs text-stone-400">사진 바깥 흰 여백 — 웨딩 사진은 넉넉하게 권장합니다.</p>
+          <p className="mt-1 text-xs text-neutral-500">사진 바깥 흰 여백 — 웨딩 사진은 넉넉하게 권장합니다.</p>
         </div>
       </Section>
 
@@ -244,7 +267,7 @@ export default function SettingsPanel({
               </Chip>
             ))}
           </div>
-          <p className="mt-1 text-xs text-stone-400">사진마다 테두리 디자인을 입힙니다. 출력 파일에도 반영됩니다.</p>
+          <p className="mt-1 text-xs text-neutral-500">사진마다 테두리 디자인을 입힙니다. 출력 파일에도 반영됩니다.</p>
         </Section>
       )}
 
@@ -256,7 +279,7 @@ export default function SettingsPanel({
             </Chip>
           ))}
         </div>
-        <p className="mt-1.5 text-xs text-stone-400">
+        <p className="mt-1.5 text-xs text-neutral-500">
           회색: 재단 시 잘리는 영역 — 화면 가이드일 뿐이며 출력 파일에는 찍히지 않습니다.
         </p>
       </Section>
@@ -273,17 +296,19 @@ export default function SettingsPanel({
         </Section>
       )}
 
-      <Section title="텍스트">
-        <button
-          onClick={() => s.addText()}
-          className="w-full rounded-md border border-stone-300 py-2 text-sm font-medium hover:border-stone-400"
-        >
-          + 텍스트 추가
-        </button>
-        <p className="mt-1.5 text-xs text-stone-400">용지 위 아무 곳에나 드래그해 배치할 수 있습니다.</p>
-      </Section>
+      {TEXT_ENABLED && (
+        <Section title="텍스트">
+          <button
+            onClick={() => s.addText()}
+            className="min-h-11 w-full rounded-lg border border-dashed border-accent/60 bg-accent-soft/40 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft"
+          >
+            + 텍스트 추가
+          </button>
+          <p className="mt-1.5 text-xs text-neutral-500">용지 위 아무 곳에나 드래그해 배치할 수 있습니다.</p>
+        </Section>
+      )}
 
-      {s.selectedTextId && (
+      {TEXT_ENABLED && s.selectedTextId && (
         <Section title="선택한 텍스트">
           <TextTools />
         </Section>
@@ -294,11 +319,11 @@ export default function SettingsPanel({
           <button
             onClick={onPreview}
             disabled={!hasPhotos || exporting}
-            className="w-full rounded-md border border-stone-300 py-2 text-sm font-medium disabled:opacity-40"
+            className="min-h-11 w-full rounded-lg border border-line py-2 text-sm font-semibold disabled:opacity-40"
           >
             액자 미리보기
           </button>
-          <p className="mt-1.5 text-xs text-stone-400">현재 조판을 액자로 걸어 놓은 모습으로 미리 봅니다.</p>
+          <p className="mt-1.5 text-xs text-neutral-500">현재 조판을 액자로 걸어 놓은 모습으로 미리 봅니다.</p>
         </Section>
       )}
 
@@ -307,26 +332,26 @@ export default function SettingsPanel({
           <button
             onClick={() => onExport('pdf')}
             disabled={exporting}
-            className="flex-1 rounded-md bg-ink py-2 text-sm font-medium text-white disabled:opacity-40"
+            className="min-h-11 flex-1 rounded-full bg-accent py-2 text-[15px] text-white transition-colors hover:bg-accent-focus disabled:opacity-40"
           >
             {exporting ? '내보내는 중…' : 'PDF'}
           </button>
           <button
             onClick={() => onExport('png')}
             disabled={exporting}
-            className="rounded-md border border-stone-300 px-3 py-2 text-sm disabled:opacity-40"
+            className="min-h-11 rounded-full border border-accent px-4 py-2 text-[15px] text-accent transition-colors hover:bg-accent-soft disabled:opacity-40"
           >
             PNG
           </button>
           <button
             onClick={() => onExport('jpg')}
             disabled={exporting}
-            className="rounded-md border border-stone-300 px-3 py-2 text-sm disabled:opacity-40"
+            className="min-h-11 rounded-full border border-accent px-4 py-2 text-[15px] text-accent transition-colors hover:bg-accent-soft disabled:opacity-40"
           >
             JPG
           </button>
         </div>
-        <p className="mt-1.5 text-xs text-stone-400">
+        <p className="mt-1.5 text-xs text-neutral-500">
           출력 크기 {s.widthMm}×{s.heightMm}mm · sRGB 기반 인쇄 파일입니다.
         </p>
       </Section>
@@ -335,36 +360,38 @@ export default function SettingsPanel({
 }
 
 function PhotoTools() {
-  const { selectedId, photos, updatePhoto, removePhoto, zoomPhotoInCell } = useEditorStore();
-  const photo = photos.find((p) => p.id === selectedId);
+  const photo = useEditorStore((st) => st.photos.find((p) => p.id === st.selectedId));
+  const { updatePhoto, removePhoto, zoomPhotoInCell } = useEditorStore(
+    useShallow((st) => ({ updatePhoto: st.updatePhoto, removePhoto: st.removePhoto, zoomPhotoInCell: st.zoomPhotoInCell })),
+  );
   if (!photo) return null;
   return (
     <div className="flex flex-wrap gap-1.5 text-sm">
-      <button className="rounded border border-stone-300 px-2 py-1" onClick={() => zoomPhotoInCell(photo.id, 1.1)}>
+      <button className={TOOL_BTN} onClick={() => zoomPhotoInCell(photo.id, 1.1)}>
         확대 +
       </button>
-      <button className="rounded border border-stone-300 px-2 py-1" onClick={() => zoomPhotoInCell(photo.id, 1 / 1.1)}>
+      <button className={TOOL_BTN} onClick={() => zoomPhotoInCell(photo.id, 1 / 1.1)}>
         축소 −
       </button>
       <button
-        className="rounded border border-stone-300 px-2 py-1"
+        className={TOOL_BTN}
         onClick={() => updatePhoto(photo.id, { rotation: (photo.rotation + 90) % 360 })}
       >
         회전 90°
       </button>
       <button
-        className="rounded border border-stone-300 px-2 py-1"
+        className={TOOL_BTN}
         onClick={() => updatePhoto(photo.id, { scaleX: photo.scaleX === 1 ? -1 : 1 })}
       >
         좌우 반전
       </button>
       <button
-        className="rounded border border-stone-300 px-2 py-1"
+        className={TOOL_BTN}
         onClick={() => updatePhoto(photo.id, { scaleY: photo.scaleY === 1 ? -1 : 1 })}
       >
         상하 반전
       </button>
-      <button className="rounded border border-red-200 px-2 py-1 text-red-600" onClick={() => removePhoto(photo.id)}>
+      <button className={DANGER_BTN} onClick={() => removePhoto(photo.id)}>
         삭제
       </button>
     </div>
@@ -372,8 +399,8 @@ function PhotoTools() {
 }
 
 function PhotoFilterTools() {
-  const { selectedId, photos, updatePhoto } = useEditorStore();
-  const photo = photos.find((p) => p.id === selectedId);
+  const photo = useEditorStore((st) => st.photos.find((p) => p.id === st.selectedId));
+  const updatePhoto = useEditorStore((st) => st.updatePhoto);
   if (!photo) return null;
   return (
     <div className="flex flex-wrap gap-1.5 text-sm">
@@ -385,8 +412,10 @@ function PhotoFilterTools() {
 }
 
 function TextTools() {
-  const { selectedTextId, texts, updateText, removeText } = useEditorStore();
-  const textBox = texts.find((t) => t.id === selectedTextId);
+  const textBox = useEditorStore((st) => st.texts.find((t) => t.id === st.selectedTextId));
+  const { updateText, removeText } = useEditorStore(
+    useShallow((st) => ({ updateText: st.updateText, removeText: st.removeText })),
+  );
   if (!textBox) return null;
   return (
     <div className="space-y-2.5">
@@ -394,13 +423,13 @@ function TextTools() {
         value={textBox.text}
         onChange={(e) => updateText(textBox.id, { text: e.target.value })}
         rows={2}
-        className="w-full resize-none rounded-md border border-stone-300 p-2 text-sm"
+        className="w-full resize-none rounded-lg border border-line bg-sheet p-2 text-sm focus:border-accent"
         placeholder="문구를 입력하세요"
       />
 
       <div className="flex items-center justify-between">
-        <span className="text-xs text-stone-500">글자 크기</span>
-        <span className="text-xs font-medium text-stone-700">{textBox.fontSizeMm}mm</span>
+        <span className="text-xs text-neutral-500">글자 크기</span>
+        <span className="text-xs font-semibold text-neutral-700">{textBox.fontSizeMm}mm</span>
       </div>
       <input
         type="range"
@@ -414,7 +443,7 @@ function TextTools() {
       />
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-stone-500">정렬</span>
+        <span className="text-xs text-neutral-500">정렬</span>
         {(['left', 'center', 'right'] as const).map((align) => (
           <Chip key={align} active={textBox.align === align} onClick={() => updateText(textBox.id, { align })}>
             {align === 'left' ? '왼쪽' : align === 'center' ? '가운데' : '오른쪽'}
@@ -423,26 +452,144 @@ function TextTools() {
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-stone-500">굵게</span>
+        <span className="text-xs text-neutral-500">굵게</span>
         <Chip active={textBox.bold} onClick={() => updateText(textBox.id, { bold: !textBox.bold })}>
           B
         </Chip>
-        <span className="ml-2 text-xs text-stone-500">색상</span>
+        <span className="ml-2 text-xs text-neutral-500">색상</span>
         <input
           type="color"
           value={textBox.color}
           onChange={(e) => updateText(textBox.id, { color: e.target.value })}
-          className="h-7 w-9 cursor-pointer rounded border border-stone-300 p-0.5"
+          className="h-9 w-11 cursor-pointer rounded-md border border-line p-0.5"
           aria-label="글자 색상"
         />
       </div>
 
       <button
-        className="rounded border border-red-200 px-2 py-1 text-sm text-red-600"
+        className={`${DANGER_BTN} text-sm`}
         onClick={() => removeText(textBox.id)}
       >
         삭제
       </button>
     </div>
+  );
+}
+
+/**
+ * 변마다 여백 조절: 용지 비율 그대로 축소한 미니 도식 둘레에 위·아래·왼쪽·오른쪽 입력칸을 실제 위치대로 배치한다.
+ * 슬라이더 4개를 세로로 늘어놓던 방식은 어느 슬라이더가 어느 변인지 한눈에 안 보이고,
+ * 마주보는 변 값에 따라 상한이 바뀌어 손잡이가 저절로 움직여 보였다 → 숫자 입력 + 위치 도식으로 교체.
+ * 입력칸에 포커스하면 도식의 해당 변이 강조돼 어느 변을 바꾸는지 바로 보인다.
+ */
+function MarginSidesEditor() {
+  const { widthMm, heightMm, margins, setMarginSide } = useEditorStore(
+    useShallow((st) => ({
+      widthMm: st.widthMm,
+      heightMm: st.heightMm,
+      margins: st.margins,
+      setMarginSide: st.setMarginSide,
+    })),
+  );
+  const [focused, setFocused] = useState<MarginSide | null>(null);
+
+  // 도식 크기(px): 가운데 칸(약 100px)에 용지 비율 그대로 맞춘다
+  const k = Math.min(88 / widthMm, 112 / heightMm);
+  const input = (side: MarginSide) => (
+    <MarginInput
+      side={side}
+      value={margins[side]}
+      max={maxMarginForSide(widthMm, heightMm, side, margins)}
+      onCommit={(mm) => setMarginSide(side, mm)}
+      onFocusChange={setFocused}
+    />
+  );
+  const band = (side: MarginSide) => (focused === side ? 'bg-accent/35' : 'bg-transparent');
+
+  return (
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1.5">
+      <div />
+      <div className="justify-self-center">{input('top')}</div>
+      <div />
+
+      {input('left')}
+      {/* 미니 용지: 바깥 = 용지, 안쪽 = 사진이 들어가는 영역. 크기는 실제 mm 비율 */}
+      <div
+        aria-hidden
+        className="relative justify-self-center border border-line bg-sheet"
+        style={{ width: widthMm * k, height: heightMm * k }}
+      >
+        <div className={`absolute inset-x-0 top-0 transition-colors ${band('top')}`} style={{ height: margins.top * k }} />
+        <div className={`absolute inset-x-0 bottom-0 transition-colors ${band('bottom')}`} style={{ height: margins.bottom * k }} />
+        <div className={`absolute inset-y-0 left-0 transition-colors ${band('left')}`} style={{ width: margins.left * k }} />
+        <div className={`absolute inset-y-0 right-0 transition-colors ${band('right')}`} style={{ width: margins.right * k }} />
+        <div
+          className="absolute rounded-[1px] bg-desk"
+          style={{
+            top: margins.top * k,
+            left: margins.left * k,
+            right: margins.right * k,
+            bottom: margins.bottom * k,
+          }}
+        />
+      </div>
+      {input('right')}
+
+      <div />
+      <div className="justify-self-center">{input('bottom')}</div>
+      <div />
+    </div>
+  );
+}
+
+/**
+ * 여백 숫자 입력칸(mm). 입력 중엔 문자열 초안을 따로 들고 있어 지우고 다시 쓰는 동안 값이 0으로 튀지 않는다.
+ * 검증: 숫자 1~4자리만 반영(허용 목록), 범위 클램프는 스토어(setMarginSide)가 한다.
+ * 반영은 Enter·포커스 해제 때 한 번만 — 키마다 반영하면 "21→4→40"처럼 중간값에서 슬롯이 넓어져
+ * 사진이 cover 크기로 커진 채 되돌아오지 않는다(keepPhotosOnPaper는 키우기만 한다).
+ */
+function MarginInput({
+  side,
+  value,
+  max,
+  onCommit,
+  onFocusChange,
+}: {
+  side: MarginSide;
+  value: number;
+  max: number;
+  onCommit: (mm: number) => void;
+  onFocusChange: (side: MarginSide | null) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <label className="flex flex-col items-center gap-0.5">
+      <span className="text-[11px] leading-none text-neutral-500">{MARGIN_SIDE_LABELS[side]}</span>
+      <span className="relative">
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={max}
+          step={1}
+          value={draft ?? value}
+          onChange={(e) => setDraft(e.target.value.trim())}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
+          onFocus={() => onFocusChange(side)}
+          onBlur={() => {
+            if (draft !== null && /^\d{1,4}$/.test(draft)) onCommit(Number(draft));
+            setDraft(null);
+            onFocusChange(null);
+          }}
+          aria-label={`${MARGIN_SIDE_LABELS[side]} 여백 mm (최대 ${max}mm)`}
+          className="h-11 w-[4.5rem] rounded-md border [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none border-line bg-sheet pl-2 pr-7 text-center text-sm tabular-nums text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 lg:h-8"
+        />
+        <span aria-hidden className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-neutral-400">
+          mm
+        </span>
+      </span>
+    </label>
   );
 }

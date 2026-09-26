@@ -1,4 +1,3 @@
-import { jsPDF } from 'jspdf';
 import type Konva from 'konva';
 import { mmToExportPx } from './convertMM';
 
@@ -15,15 +14,8 @@ import { mmToExportPx } from './convertMM';
 const MOBILE_MAX_EXPORT_PX = 4096;
 const DESKTOP_MAX_EXPORT_PX = 8192;
 
-export function isMobileLike(): boolean {
-  if (typeof navigator === 'undefined') return false;
+function isMobileLike(): boolean {
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-}
-
-/** 기획안 v2 §10: 추출 시도 전에 규격×기기 감지 */
-export function canExportOnDevice(pageWmm: number, pageHmm: number): boolean {
-  const limit = isMobileLike() ? MOBILE_MAX_EXPORT_PX : DESKTOP_MAX_EXPORT_PX;
-  return mmToExportPx(pageWmm) <= limit && mmToExportPx(pageHmm) <= limit;
 }
 
 export interface ExportSpec {
@@ -63,8 +55,11 @@ function renderToDataUrl(
   });
 }
 
-export function exportStageToPdf(stage: Konva.Stage, spec: ExportSpec, fileName: string): void {
+export async function exportStageToPdf(stage: Konva.Stage, spec: ExportSpec, fileName: string): Promise<void> {
+  // 캡처는 import 대기 전에 동기로 끝내 둔다 — 대기 중 화면(가이드·원본 교체 상태)이 바뀌어도 출력물은 영향 없음
   const dataUrl = renderToDataUrl(stage, spec, 'image/jpeg');
+  // jsPDF(약 330KB)는 PDF 저장 때만 필요하므로 에디터 첫 로딩 번들에서 빼고 이때 불러온다
+  const { jsPDF } = await import('jspdf');
 
   const orientation = spec.pageWmm >= spec.pageHmm ? 'landscape' : 'portrait';
   const pdf = new jsPDF({

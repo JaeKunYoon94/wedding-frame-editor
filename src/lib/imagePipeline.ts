@@ -87,6 +87,52 @@ async function downscale(blob: Blob): Promise<{ blob: Blob; width: number; heigh
   return { blob: out, width: canvas.width, height: canvas.height };
 }
 
+/**
+ * 출력 직전: 원본을 인쇄에 실제로 필요한 픽셀 폭(targetW)으로 고품질 축소한다.
+ * 왜: 큰 원본(4000~8000px)을 Konva가 한 번에 크게 줄여 그리면 캔버스 기본 보간(imageSmoothingQuality 'low')
+ * 때문에 머리카락·레이스 같은 잔무늬에 계단·모아레가 생긴다. 절반씩 단계적으로 줄이면(각 단계 'high')
+ * 박스 필터에 가까운 결과가 나오고, 마지막엔 Konva가 거의 1:1로 그리기만 한다.
+ * 필요 이상 큰 원본을 디코딩한 채 들고 있지 않아 모바일 메모리 부담도 준다.
+ * 원본이 이미 targetW 이하면 확대하지 않고 그대로 돌려준다(확대로는 화질이 늘지 않음).
+ * 결과는 PNG(무손실) — 최종 JPEG/PNG 인코딩 전에 손실을 한 번 더 얹지 않기 위함.
+ */
+export async function resizeForPrint(blob: Blob, targetW: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob);
+  const target = Math.max(1, Math.round(targetW));
+  if (bitmap.width <= target) {
+    bitmap.close();
+    return blob;
+  }
+  const ratio = bitmap.height / bitmap.width;
+  let src: CanvasImageSource = bitmap;
+  let w = bitmap.width;
+  let h = bitmap.height;
+  let canvas: HTMLCanvasElement | null = null;
+  while (w > target) {
+    // 한 단계에 절반 넘게 줄이지 않는다 — 'high' 보간도 2배 이상 축소에선 픽셀을 건너뛰기 때문
+    const nextW = Math.max(target, Math.ceil(w / 2));
+    const nextH = nextW === target ? Math.max(1, Math.round(target * ratio)) : Math.ceil(h / 2);
+    const next = document.createElement('canvas');
+    next.width = nextW;
+    next.height = nextH;
+    const ctx = next.getContext('2d');
+    if (!ctx) break;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, nextW, nextH);
+    if (canvas) canvas.width = 0; // 이전 단계 캔버스 메모리를 즉시 반납
+    canvas = next;
+    src = next;
+    w = nextW;
+    h = nextH;
+  }
+  bitmap.close();
+  if (!canvas) return blob;
+  const out = await new Promise<Blob | null>((resolve) => canvas!.toBlob(resolve, 'image/png'));
+  canvas.width = 0;
+  return out ?? blob;
+}
+
 export async function processUpload(file: File): Promise<LibraryItem> {
   const decodable = await toDecodableBlob(file);
   const normalized = await normalizeOrientation(decodable);

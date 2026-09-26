@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { processUpload } from '@/lib/imagePipeline';
 import { useEditorStore } from '@/stores/editorStore';
@@ -19,7 +19,12 @@ export default function LibraryPanel({
   placingId?: string | null;
   onPlacingChange?: (id: string | null) => void;
 }) {
-  const { library, addLibraryItems, photos } = useEditorStore();
+  const library = useEditorStore((s) => s.library);
+  const addLibraryItems = useEditorStore((s) => s.addLibraryItems);
+  // "배치됨" 표시에는 배치된 사진의 src만 필요 — 사진 위치·줌 변경에는 반응하지 않도록 문자열로 구독
+  // (blob: URL에는 공백이 없으므로 공백을 구분자로 쓴다)
+  const placedSrcKey = useEditorStore((s) => s.photos.map((p) => p.src).join(' '));
+  const placedSrcs = useMemo(() => new Set(placedSrcKey.split(' ')), [placedSrcKey]);
   const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,31 +58,33 @@ export default function LibraryPanel({
   });
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3">
+    <div className="flex h-full flex-col gap-3 p-4">
       <div
         {...getRootProps()}
-        className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center text-sm transition-colors ${
-          isDragActive ? 'border-accent bg-amber-50' : 'border-stone-300 bg-stone-50'
+        className={`cursor-pointer rounded-xl border border-dashed p-5 text-center text-sm transition-all ${
+          isDragActive
+            ? 'scale-[1.02] border-accent bg-accent-soft'
+            : 'border-accent/40 bg-paper hover:border-accent hover:bg-accent-soft/50'
         }`}
       >
         <input {...getInputProps()} />
-        <p className="text-stone-600">사진을 여기로 드래그해주세요</p>
-        <p className="mt-1 text-xs text-stone-400">또는 눌러서 파일 선택 · JPG/PNG/WEBP/HEIC</p>
+        <p className="font-display text-base text-ink">사진을 여기로 드래그해주세요</p>
+        <p className="mt-1 text-xs text-neutral-500">또는 눌러서 파일 선택 · JPG/PNG/WEBP/HEIC</p>
       </div>
 
       {library.length > 0 && (
-        <p className="text-xs text-stone-500">
+        <p className="text-xs text-neutral-500">
           {placingId ? '캔버스의 슬롯을 눌러 배치하세요' : '사진을 눌러 고른 뒤 슬롯을 누르세요'}
         </p>
       )}
 
-      <p className="text-xs text-stone-400">사진은 내 기기를 벗어나지 않습니다.</p>
+      <p className="text-xs text-neutral-500">사진은 내 기기를 벗어나지 않습니다.</p>
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <div className="grid flex-1 auto-rows-min grid-cols-3 gap-2 overflow-y-auto lg:grid-cols-2">
         {library.map((item, i) => {
           const picked = placingId === item.id;
-          const placed = photos.some((p) => p.src === item.src);
+          const placed = placedSrcs.has(item.src);
           return (
             <button
               key={item.id}
@@ -87,8 +94,8 @@ export default function LibraryPanel({
                 e.dataTransfer.effectAllowed = 'copy';
               }}
               onClick={() => onPlacingChange?.(picked ? null : item.id)}
-              className={`relative aspect-square touch-manipulation cursor-grab overflow-hidden rounded-md border bg-white active:cursor-grabbing ${
-                picked ? 'border-accent ring-2 ring-accent/40' : 'border-stone-200'
+              className={`relative aspect-square touch-manipulation cursor-grab overflow-hidden rounded-lg border bg-sheet transition-colors hover:border-accent active:cursor-grabbing ${
+                picked ? 'border-accent ring-2 ring-accent/40' : 'border-line'
               }`}
               style={{ WebkitTouchCallout: 'none' }}
               title={`${i + 1}. ${item.fileName}${placed ? ' (배치됨)' : ''} — 눌러서 고르기 / 슬롯으로 드래그`}
@@ -110,13 +117,13 @@ export default function LibraryPanel({
               />
 
               {/* 순번 배지 */}
-              <span className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-ink/75 px-1 text-[11px] font-medium text-white">
+              <span className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-ink/75 px-1 text-[11px] font-semibold text-white">
                 {i + 1}
               </span>
 
               {/* 이미 배치된 사진 표시 */}
               {placed && !picked && (
-                <span className="absolute inset-x-0 bottom-0 bg-stone-800/70 py-0.5 text-[11px] text-white">
+                <span className="absolute inset-x-0 bottom-0 bg-neutral-800/70 py-0.5 text-[11px] text-white">
                   배치됨
                 </span>
               )}
@@ -131,9 +138,9 @@ export default function LibraryPanel({
         {Array.from({ length: pendingCount }).map((_, i) => (
           <div
             key={`pending-${i}`}
-            className="flex aspect-square items-center justify-center rounded-md border border-stone-200 bg-stone-50"
+            className="flex aspect-square items-center justify-center rounded-lg border border-line bg-paper"
           >
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-stone-300 border-t-accent" />
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-accent" />
           </div>
         ))}
       </div>

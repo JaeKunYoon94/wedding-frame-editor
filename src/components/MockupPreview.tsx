@@ -60,7 +60,7 @@ export default function MockupPreview({
       role="dialog"
       aria-modal="true"
     >
-      <div className="relative w-full max-w-3xl overflow-hidden rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-2xl shadow-product" onClick={(e) => e.stopPropagation()}>
         <div
           className="relative w-full"
           style={{ aspectRatio: '3 / 2', background: 'linear-gradient(180deg,#efeeeb 0%,#e9e8e4 68%,#e3e2de 100%)' }}
@@ -117,8 +117,8 @@ export default function MockupPreview({
                 boxShadow: '0 6px 10px rgba(0,0,0,0.10)',
               }}
             />
-            <div className="absolute left-[6%] top-2.5 h-[70px] w-[3px] rounded bg-gradient-to-b from-stone-400 to-stone-300 sm:h-[110px]" />
-            <div className="absolute right-[6%] top-2.5 h-[70px] w-[3px] rounded bg-gradient-to-b from-stone-400 to-stone-300 sm:h-[110px]" />
+            <div className="absolute left-[6%] top-2.5 h-[70px] w-[3px] rounded bg-gradient-to-b from-neutral-400 to-neutral-300 sm:h-[110px]" />
+            <div className="absolute right-[6%] top-2.5 h-[70px] w-[3px] rounded bg-gradient-to-b from-neutral-400 to-neutral-300 sm:h-[110px]" />
           </div>
         </div>
 

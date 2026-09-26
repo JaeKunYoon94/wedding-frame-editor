@@ -1,3 +1,44 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 전역 기본값: 키보드 포커스 표시와 움직임 줄이기 설정은 디자인보다 우선한다 (CLAUDE.md 프론트엔드 디자인 규칙). */
+@layer base {
+  /* DESIGN.md: 포커스 링은 Focus Blue 2px solid */
+  :focus-visible {
+    outline: 2px solid theme('colors.accent.focus');
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: theme('colors.accent.soft');
+  }
+  /* DESIGN.md: 모든 버튼의 눌림 상태는 scale(0.95). :where()로 우선순위를 0으로 둬 개별 transform 유틸리티를 덮지 않는다 */
+  :where(button, a[href]):active:not(:disabled) {
+    transform: scale(0.95);
+  }
+}
+
+@layer components {
+  /* 제목: SF Pro Display 600 + 살짝 좁힌 자간 ("Apple tight"). 12px 이하에는 쓰지 않는다 */
+  .font-display {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  /* 랜딩 배경: DESIGN.md는 장식 그라데이션을 쓰지 않는다 — 파치먼트 단색 면. (클래스명은 기존 사용처 호환용) */
+  .bg-atmosphere {
+    background-color: theme('colors.paper');
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  :where(button, a[href]):active:not(:disabled) {
+    transform: none;
+  }
+}

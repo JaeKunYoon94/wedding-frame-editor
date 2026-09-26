@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Stage, Layer, Rect, Group, Image as KImage, Line, Circle, Text as KText } from 'react-konva';
 import Konva from 'konva';
 import useImage from 'use-image';
+import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '@/stores/editorStore';
 import { useFrameStore } from '@/stores/frameStore';
-import { mmToScreenPx, screenPxToMm } from '@/lib/convertMM';
+import { mmToExportPx, mmToScreenPx, screenPxToMm } from '@/lib/convertMM';
+import { resizeForPrint } from '@/lib/imagePipeline';
 import { framePaddingMm, getFrameSample } from '@/lib/frames';
 import { loadOriginal } from '@/lib/storage';
 import FramePreview from './FramePreview';
@@ -27,6 +29,39 @@ import type { LayoutCell, Photo, PhotoFrame, TextBox } from '@/types';
 /** 삭제 버튼 반경 (화면 px 고정) — 데스크탑은 넉넉하게, 모바일은 캔버스를 덜 가리도록 살짝 작게 */
 const DELETE_BADGE_R = 15;
 const DELETE_BADGE_R_MOBILE = 11;
+
+function setCursor(node: Konva.Node, cursor: string) {
+  const stage = node.getStage();
+  if (stage) stage.container().style.cursor = cursor;
+}
+
+/** 사진·텍스트박스 공용 삭제 버튼 (×). 클릭이 상위 그룹의 선택 처리로 번지지 않게 막는다. */
+function DeleteBadge({ x, y, r, onDelete }: { x: number; y: number; r: number; onDelete: () => void }) {
+  return (
+    <Group
+      x={x}
+      y={y}
+      onMouseEnter={(e) => setCursor(e.target, 'pointer')}
+      onMouseLeave={(e) => setCursor(e.target, 'default')}
+      onClick={(e) => {
+        e.cancelBubble = true;
+        setCursor(e.target, 'default');
+        onDelete();
+      }}
+      onTap={(e) => {
+        e.cancelBubble = true;
+        onDelete();
+      }}
+    >
+      <Circle radius={r} fill="rgba(24,24,27,0.72)" stroke="#ffffff" strokeWidth={1.5} />
+      <Line points={[-5, -5, 5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
+      <Line points={[5, -5, -5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
+    </Group>
+  );
+}
+
+/** 도구 상자(PhotoToolbar) 화살표 한 번에 사진을 옮기는 거리(mm) */
+export const NUDGE_MM = 2;
 
 /**
  * 사진 테두리 디자인(폴라로이드·인생네컷)을 셀 위에 오버레이로 그린다.
@@ -210,7 +245,9 @@ const LONG_PRESS_MS = 350;
 /** 이 거리(px) 이상 손가락이 움직이면 누르기를 취소하고 일반 스와이프로 취급 */
 const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 
-function PhotoInCell({
+// memo: 한 사진을 드래그·줌해도 나머지 슬롯은 photo 객체가 그대로이므로 다시 렌더하지 않는다.
+// (부모가 넘기는 콜백은 모두 useCallback으로 고정돼 있어야 효과가 있다)
+const PhotoInCell = memo(function PhotoInCell({
   photo,
   cell,
   scale,
@@ -235,7 +272,7 @@ function PhotoInCell({
   /** 핀치 중에는 드래그를 막아 두 제스처가 충돌하지 않게 한다 */
   draggable: boolean;
   /** 배치 대기 중인 사진이 있으면 교체하고 true 반환 */
-  onCellTap: () => boolean;
+  onCellTap: (cellId: string) => boolean;
   photoFrame: PhotoFrame;
   /** 삭제 버튼 반경(화면 px) — 모바일에서는 더 작게 */
   deleteBadgeR: number;
@@ -255,9 +292,16 @@ function PhotoInCell({
   // 캔버스에 재드로잉해 변환한다. cache 방식은 pixelRatio 상한에 걸리면 확대·출력 시
   // 컬러 사진보다 화질이 떨어지므로, 원본 픽셀 수를 그대로 보존하는 이 방식을 쓴다.
   const [grayscaleImg, setGrayscaleImg] = useState<HTMLCanvasElement | undefined>(undefined);
-  const { select, nudgePhotoInCell, removePhoto, movePhotoToCell } = useEditorStore();
+  // 액션만 골라 구독 — 스토어 전체를 구독하면 아무 상태가 바뀌어도 모든 슬롯이 다시 렌더된다
+  const { select, nudgePhotoInCell, removePhoto, movePhotoToCell } = useEditorStore(
+    useShallow((s) => ({
+      select: s.select,
+      nudgePhotoInCell: s.nudgePhotoInCell,
+      removePhoto: s.removePhoto,
+      movePhotoToCell: s.movePhotoToCell,
+    })),
+  );
   const dragOrigin = useRef<{ x: number; y: number } | null>(null);
-  const imgRef = useRef<Konva.Image>(null);
   const [hovered, setHovered] = useState(false);
   const [draggingAcross, setDraggingAcross] = useState(false);
   const [longPressReady, setLongPressReady] = useState(false);
@@ -278,10 +322,8 @@ function PhotoInCell({
   const pw = mmToScreenPx(photo.width * photo.zoom, scale);
   const ph = mmToScreenPx(photo.height * photo.zoom, scale);
 
-  const setCursor = (node: Konva.Node, cursor: string) => {
-    const stage = node.getStage();
-    if (stage) stage.container().style.cursor = cursor;
-  };
+  /** 슬롯 간 이동 허용 여부 — 모바일은 꾹 눌러 대기한 드래그만, 데스크탑은 바로 허용 */
+  const allowCrossCell = () => canMoveAcrossCells && (!isMobile || longPressArmed.current);
 
   // 흑백 변환: 로드된 이미지(편집 중엔 다운스케일본, 추출 직전엔 원본으로 교체됨)의
   // 실제 픽셀 크기 그대로 오프스크린 캔버스에 옮겨 그레이스케일화한다.
@@ -329,16 +371,15 @@ function PhotoInCell({
       y={mmToScreenPx(cell.y, scale)}
       {...(draggingAcross ? {} : { clipX: 0, clipY: 0, clipWidth: cw, clipHeight: ch })}
       onClick={() => {
-        if (!onCellTap()) select(photo.id);
+        if (!onCellTap(cell.id)) select(photo.id);
       }}
       onTap={() => {
-        if (!onCellTap()) select(photo.id);
+        if (!onCellTap(cell.id)) select(photo.id);
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <KImage
-        ref={imgRef}
         image={photo.grayscale ? grayscaleImg : img}
         x={cw / 2 + mmToScreenPx(photo.offsetX, scale)}
         y={ch / 2 + mmToScreenPx(photo.offsetY, scale)}
@@ -375,16 +416,13 @@ function PhotoInCell({
         }}
         onDragStart={(e) => {
           dragOrigin.current = { x: e.target.x(), y: e.target.y() };
-          // 모바일은 꾹 눌러 대기한 드래그만, 데스크탑은 바로 슬롯 이동 허용
-          const allowCrossCell = canMoveAcrossCells && (!isMobile || longPressArmed.current);
-          if (allowCrossCell) {
+          if (allowCrossCell()) {
             setDraggingAcross(true);
             e.target.getParent()?.moveToTop();
           }
         }}
         onDragMove={(e) => {
-          const allowCrossCell = canMoveAcrossCells && (!isMobile || longPressArmed.current);
-          if (!allowCrossCell) return;
+          if (!allowCrossCell()) return;
           // 손가락을 누르고 있다가 드래그 도중 대기 시간이 끝난 경우도 뒤늦게 슬롯 이동 모드로 전환
           if (!draggingAcross) {
             setDraggingAcross(true);
@@ -399,10 +437,9 @@ function PhotoInCell({
         onDragEnd={(e) => {
           const o = dragOrigin.current;
           if (!o) return;
-          const allowCrossCell = canMoveAcrossCells && (!isMobile || longPressArmed.current);
           const stage = e.target.getStage();
           const pointer = stage?.getPointerPosition();
-          const targetCell = allowCrossCell && pointer ? resolveCellAtStagePoint(pointer.x, pointer.y) : undefined;
+          const targetCell = allowCrossCell() && pointer ? resolveCellAtStagePoint(pointer.x, pointer.y) : undefined;
           if (targetCell && targetCell.id !== cell.id) {
             movePhotoToCell(photo.id, targetCell.id);
             e.target.position(o);
@@ -428,7 +465,7 @@ function PhotoInCell({
       <PhotoFrameOverlay frame={photoFrame} cw={cw} ch={ch} />
 
       {interactive && selected && (
-        <Rect x={0} y={0} width={cw} height={ch} stroke="#9d7a54" strokeWidth={2} listening={false} />
+        <Rect x={0} y={0} width={cw} height={ch} stroke="#0066cc" strokeWidth={2} listening={false} />
       )}
 
       {/* 꾹 눌러 슬롯 이동이 활성화됐음을 알리는 표시 (아직 드래그를 시작하기 전) */}
@@ -438,7 +475,7 @@ function PhotoInCell({
           y={0}
           width={cw}
           height={ch}
-          stroke="#9d7a54"
+          stroke="#0066cc"
           strokeWidth={3}
           dash={[6, 4]}
           listening={false}
@@ -447,35 +484,22 @@ function PhotoInCell({
 
       {/* 사진 위에 커서를 올리면(모바일: 선택하면) 나타나는 삭제 버튼 */}
       {showDelete && (
-        <Group
+        <DeleteBadge
           x={cw - deleteBadgeR - 8}
           y={deleteBadgeR + 8}
-          onMouseEnter={(e) => setCursor(e.target, 'pointer')}
-          onMouseLeave={(e) => setCursor(e.target, 'default')}
-          onClick={(e) => {
-            e.cancelBubble = true;
-            setCursor(e.target, 'default');
-            removePhoto(photo.id);
-          }}
-          onTap={(e) => {
-            e.cancelBubble = true;
-            removePhoto(photo.id);
-          }}
-        >
-          <Circle radius={deleteBadgeR} fill="rgba(24,24,27,0.72)" stroke="#ffffff" strokeWidth={1.5} />
-          <Line points={[-5, -5, 5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
-          <Line points={[5, -5, -5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
-        </Group>
+          r={deleteBadgeR}
+          onDelete={() => removePhoto(photo.id)}
+        />
       )}
     </Group>
   );
-}
+});
 
 /**
  * 용지 위에 자유 배치하는 텍스트박스. 슬롯에 묶이지 않고 어디로든 드래그할 수 있다.
  * 실제 문구 편집은 설정 패널의 입력창에서 하고, 캔버스에서는 위치·선택만 다룬다.
  */
-function TextBoxNode({
+const TextBoxNode = memo(function TextBoxNode({
   textBox,
   scale,
   selected,
@@ -494,9 +518,10 @@ function TextBoxNode({
   paperWmm: number;
   paperHmm: number;
   deleteBadgeR: number;
-  onSelect: () => void;
+  onSelect: (id: string) => void;
 }) {
-  const { updateText, removeText } = useEditorStore();
+  const updateText = useEditorStore((s) => s.updateText);
+  const removeText = useEditorStore((s) => s.removeText);
   const textRef = useRef<Konva.Text>(null);
   const [hovered, setHovered] = useState(false);
   const [boxHeight, setBoxHeight] = useState(0);
@@ -508,11 +533,6 @@ function TextBoxNode({
     setBoxHeight(textRef.current?.height() ?? fontSizePx * 1.4);
   }, [textBox.text, textBox.width, fontSizePx]);
 
-  const setCursor = (node: Konva.Node, cursor: string) => {
-    const stage = node.getStage();
-    if (stage) stage.container().style.cursor = cursor;
-  };
-
   const showDelete = interactive && (hovered || selected);
 
   return (
@@ -521,8 +541,8 @@ function TextBoxNode({
       y={mmToScreenPx(textBox.y, scale)}
       rotation={textBox.rotation}
       draggable={draggable}
-      onClick={onSelect}
-      onTap={onSelect}
+      onClick={() => onSelect(textBox.id)}
+      onTap={() => onSelect(textBox.id)}
       onMouseEnter={(e) => {
         setHovered(true);
         if (interactive) setCursor(e.target, 'move');
@@ -557,36 +577,23 @@ function TextBoxNode({
           y={-4}
           width={tw + 8}
           height={boxHeight + 8}
-          stroke="#9d7a54"
+          stroke="#0066cc"
           strokeWidth={2}
           listening={false}
         />
       )}
 
       {showDelete && (
-        <Group
+        <DeleteBadge
           x={tw - deleteBadgeR + 6}
           y={-deleteBadgeR - 6}
-          onMouseEnter={(e) => setCursor(e.target, 'pointer')}
-          onMouseLeave={(e) => setCursor(e.target, 'default')}
-          onClick={(e) => {
-            e.cancelBubble = true;
-            setCursor(e.target, 'default');
-            removeText(textBox.id);
-          }}
-          onTap={(e) => {
-            e.cancelBubble = true;
-            removeText(textBox.id);
-          }}
-        >
-          <Circle radius={deleteBadgeR} fill="rgba(24,24,27,0.72)" stroke="#ffffff" strokeWidth={1.5} />
-          <Line points={[-5, -5, 5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
-          <Line points={[5, -5, -5, 5]} stroke="#ffffff" strokeWidth={2} lineCap="round" />
-        </Group>
+          r={deleteBadgeR}
+          onDelete={() => removeText(textBox.id)}
+        />
       )}
     </Group>
   );
-}
+});
 
 export default function PaperCanvas({
   stageOut,
@@ -642,7 +649,26 @@ export default function PaperCanvas({
     selectedTextId,
     selectText,
     removeText,
-  } = useEditorStore();
+  } = useEditorStore(
+    // 라이브러리 목록(업로드) 변화에는 캔버스가 반응할 필요가 없으므로 필요한 값만 구독
+    useShallow((s) => ({
+      widthMm: s.widthMm,
+      heightMm: s.heightMm,
+      bleedMm: s.bleedMm,
+      cells: s.cells,
+      photos: s.photos,
+      selectedId: s.selectedId,
+      photoFrame: s.photoFrame,
+      select: s.select,
+      removePhoto: s.removePhoto,
+      assignToCell: s.assignToCell,
+      zoomPhotoInCell: s.zoomPhotoInCell,
+      texts: s.texts,
+      selectedTextId: s.selectedTextId,
+      selectText: s.selectText,
+      removeText: s.removeText,
+    })),
+  );
   const { frame, matWidthMm, matColor } = useFrameStore();
 
   const isEdit = mode === 'edit';
@@ -695,8 +721,12 @@ export default function PaperCanvas({
       const entries = await Promise.all(
         photos.map(async (p): Promise<[string, string]> => {
           try {
-            const blob = await loadOriginal(p.originalKey);
-            if (!blob) return [p.id, p.src];
+            const original = await loadOriginal(p.originalKey);
+            if (!original) return [p.id, p.src];
+            // 사진 전체(줌 포함)가 출력물에서 차지할 300dpi 픽셀 폭으로 미리 고품질 축소 (resizeForPrint 주석 참고).
+            // 모바일 캔버스 상한으로 추출 dpi가 더 낮아지면 Konva가 나머지(2배 미만)만 줄인다.
+            const blob = await resizeForPrint(original, Math.ceil(mmToExportPx(p.width * p.zoom)));
+            if (cancelled) return [p.id, p.src];
             const url = URL.createObjectURL(blob);
             originalUrlsRef.current.push(url);
             return [p.id, url];
@@ -753,27 +783,42 @@ export default function PaperCanvas({
   const bleedPx = mmToScreenPx(bleedMm, scale);
 
   /** 화면 좌표(px, stage 기준) → 재단선 원점 mm */
-  const toPaperMm = (x: number, y: number) => ({
-    xMm: screenPxToMm(x - padPx, scale) - bleedMm,
-    yMm: screenPxToMm(y - padPx, scale) - bleedMm,
-  });
+  const toPaperMm = useCallback(
+    (x: number, y: number) => ({
+      xMm: screenPxToMm(x - padPx, scale) - bleedMm,
+      yMm: screenPxToMm(y - padPx, scale) - bleedMm,
+    }),
+    [padPx, scale, bleedMm],
+  );
+
+  // 아래 두 콜백은 memo된 PhotoInCell에 그대로 넘기므로 useCallback으로 참조를 고정한다
+  // (매 렌더 새 함수를 넘기면 memo가 무력화돼 모든 슬롯이 다시 그려진다)
 
   /** 배치 대기 중인 사진이 있으면 해당 슬롯에 넣고 true 반환 */
-  const handleCellTap = (cellId: string): boolean => {
-    if (!placingId || !isEdit) return false;
-    assignToCell(placingId, cellId);
-    onPlaced?.();
-    return true;
-  };
+  const handleCellTap = useCallback(
+    (cellId: string): boolean => {
+      if (!placingId || !isEdit) return false;
+      assignToCell(placingId, cellId);
+      onPlaced?.();
+      return true;
+    },
+    [placingId, isEdit, assignToCell, onPlaced],
+  );
 
-  const cellAt = (xMm: number, yMm: number) =>
-    cells.find((c) => xMm >= c.x && xMm <= c.x + c.width && yMm >= c.y && yMm <= c.y + c.height);
+  const cellAt = useCallback(
+    (xMm: number, yMm: number) =>
+      cells.find((c) => xMm >= c.x && xMm <= c.x + c.width && yMm >= c.y && yMm <= c.y + c.height),
+    [cells],
+  );
 
   /** 스테이지 기준 px 좌표가 속한 슬롯 — 배치된 사진의 드래그 이동 대상 판별용 */
-  const getCellAtStagePoint = (x: number, y: number) => {
-    const { xMm, yMm } = toPaperMm(x, y);
-    return cellAt(xMm, yMm);
-  };
+  const getCellAtStagePoint = useCallback(
+    (x: number, y: number) => {
+      const { xMm, yMm } = toPaperMm(x, y);
+      return cellAt(xMm, yMm);
+    },
+    [toPaperMm, cellAt],
+  );
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -819,7 +864,7 @@ export default function PaperCanvas({
   return (
     <div
       ref={containerRef}
-      className="flex h-full w-full select-none items-center justify-center overflow-hidden bg-stone-200 p-2 md:p-4"
+      className="flex h-full w-full select-none items-center justify-center overflow-hidden bg-desk p-2 md:p-4"
       style={{ WebkitTouchCallout: 'none' }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
@@ -828,7 +873,7 @@ export default function PaperCanvas({
         ref={stageRef}
         width={stageW}
         height={stageH}
-        className="shadow-xl"
+        className="shadow-product"
         onTouchMove={onTouchMove}
         onTouchEnd={endPinch}
         onTouchCancel={endPinch}
@@ -876,7 +921,7 @@ export default function PaperCanvas({
                     selected={renderPhoto.id === selectedId}
                     interactive={isEdit}
                     draggable={isEdit && !pinching}
-                    onCellTap={() => handleCellTap(cell.id)}
+                    onCellTap={handleCellTap}
                     photoFrame={photoFrame}
                     deleteBadgeR={isMobile ? DELETE_BADGE_R_MOBILE : DELETE_BADGE_R}
                     canMoveAcrossCells={isEdit && cells.length > 1}
@@ -893,18 +938,12 @@ export default function PaperCanvas({
                     width={mmToScreenPx(cell.width, scale)}
                     height={mmToScreenPx(cell.height, scale)}
                     fill={placingId ? '#fdf6ec' : '#f5f5f4'}
-                    stroke={placingId ? '#9d7a54' : '#e7e5e1'}
+                    stroke={placingId ? '#0066cc' : '#e7e5e1'}
                     strokeWidth={placingId ? 2 : 1}
                     onClick={() => handleCellTap(cell.id)}
                     onTap={() => handleCellTap(cell.id)}
-                    onMouseEnter={(e) => {
-                      const st = e.target.getStage();
-                      if (st && placingId) st.container().style.cursor = 'copy';
-                    }}
-                    onMouseLeave={(e) => {
-                      const st = e.target.getStage();
-                      if (st) st.container().style.cursor = 'default';
-                    }}
+                    onMouseEnter={(e) => placingId && setCursor(e.target, 'copy')}
+                    onMouseLeave={(e) => setCursor(e.target, 'default')}
                   />
                 ) : null;
               })}
@@ -921,7 +960,7 @@ export default function PaperCanvas({
                       width={mmToScreenPx(hoverCell.width, scale)}
                       height={mmToScreenPx(hoverCell.height, scale)}
                       fill="rgba(157,122,84,0.18)"
-                      stroke="#9d7a54"
+                      stroke="#0066cc"
                       strokeWidth={2}
                       listening={false}
                     />
@@ -942,7 +981,7 @@ export default function PaperCanvas({
                   paperWmm={widthMm}
                   paperHmm={heightMm}
                   deleteBadgeR={isMobile ? DELETE_BADGE_R_MOBILE : DELETE_BADGE_R}
-                  onSelect={() => selectText(t.id)}
+                  onSelect={selectText}
                 />
               ))}
             </Group>
@@ -980,5 +1019,3 @@ export default function PaperCanvas({
     </div>
   );
 }
-
-export { PaperCanvas };

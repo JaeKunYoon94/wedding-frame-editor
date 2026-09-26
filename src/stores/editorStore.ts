@@ -2,11 +2,10 @@
 
 import { create } from 'zustand';
 import { temporal } from 'zundo';
+import { shallow } from 'zustand/shallow';
 import type {
   BleedMm,
-  GutterMm,
   LayoutCell,
-  LayoutMode,
   LayoutType,
   LibraryItem,
   Margins,
@@ -17,7 +16,7 @@ import type {
   TextBox,
 } from '@/types';
 import { DEFAULT_PAPER_ID, PAPER_SIZES, getPaperSize } from '@/lib/paperSizes';
-import { LAYOUT_COUNTS, calcCells, clampOffset, coverFit } from '@/lib/layoutCalc';
+import { calcCells, clampOffset, coverFit } from '@/lib/layoutCalc';
 
 export type MarginSide = keyof Margins;
 
@@ -28,8 +27,6 @@ export type MarginSide = keyof Margins;
  * (frame·export는 Undo 대상이 아니므로 별도 스토어 — 2차에서 분리 확장)
  */
 
-export const SAFE_AREA_MM = 5 as const; // 고정 (기획안 v2 §5)
-
 interface EditorState {
   // paper
   paperId: string;
@@ -39,9 +36,8 @@ interface EditorState {
   bleedMm: BleedMm;
 
   // layout
-  layoutMode: LayoutMode;
   layoutType: LayoutType;
-  gutterMm: GutterMm;
+  gutterMm: number;
   /** 재단선 안쪽 상하좌우 여백(mm) — 웨딩 사진용 흰 여백, 변마다 독립 조절 가능 (기획안 v2 §6 marginMm) */
   margins: Margins;
   /** 1장 레이아웃 슬롯 형태 */
@@ -60,11 +56,11 @@ interface EditorState {
   selectedTextId: string | null;
 
   // actions
-  setPaper: (id: string, custom?: { w: number; h: number }) => void;
+  setPaper: (id: string) => void;
   toggleOrientation: () => void;
   setBleed: (mm: BleedMm) => void;
   setLayout: (type: LayoutType) => void;
-  setGutter: (mm: GutterMm) => void;
+  setGutter: (mm: number) => void;
   /** 상하좌우 모두 같은 값으로 설정 */
   setMargin: (mm: number) => void;
   /** 한 변만 독립적으로 설정 */
@@ -72,6 +68,8 @@ interface EditorState {
   setSingleShape: (shape: SingleShape) => void;
   setPhotoFrame: (frame: PhotoFrame) => void;
   addLibraryItems: (items: LibraryItem[]) => void;
+  /** 라이브러리 항목과 그 사진이 배치된 슬롯을 함께 지운다 (blob: URL 해제는 호출 측 책임) */
+  removeLibraryItems: (ids: string[]) => void;
   assignToCell: (libraryId: string, cellId: string) => void;
   /** 배치된 사진을 다른 슬롯으로 이동(대상에 사진이 있으면 서로 교환) */
   movePhotoToCell: (photoId: string, targetCellId: string) => void;
@@ -86,37 +84,66 @@ interface EditorState {
   updateText: (id: string, patch: Partial<TextBox>) => void;
   removeText: (id: string) => void;
   selectText: (id: string | null) => void;
-
-  hydrate: (state: Partial<EditorState>) => void;
 }
 
 function deriveCells(
   s: Pick<
     EditorState,
-    'widthMm' | 'heightMm' | 'layoutType' | 'orientation' | 'gutterMm' | 'margins' | 'singleShape'
+    'widthMm' | 'heightMm' | 'layoutType' | 'gutterMm' | 'margins' | 'singleShape'
   >,
 ): LayoutCell[] {
-  return calcCells(s.widthMm, s.heightMm, s.layoutType, s.orientation, s.gutterMm, s.margins, s.singleShape);
+  return calcCells(s.widthMm, s.heightMm, s.layoutType, s.gutterMm, s.margins, s.singleShape);
 }
 
 /**
- * 셀 크기만 바뀌고 셀 id 구성은 그대로일 때(여백·간격 조절) 배치된 사진을
- * 새 셀에 다시 cover-fit 한다. 사진을 잃지 않고 흰 여백만 조절하기 위함.
+ * 셀 크기만 바뀌고 셀 id 구성은 그대로일 때(여백·간격·용지·방향 변경) 배치된 사진을
+ * 새 셀에 다시 cover-fit 한다. 사진을 잃지 않고 슬롯 크기만 조절하기 위함.
+ * offset(mm)은 사진 크기 변화 비율만큼 스케일해 보이는 구도(중앙 지점)를 유지한다.
  */
 function refitPhotos(cells: LayoutCell[], photos: Photo[]): Photo[] {
   return photos.map((p) => {
     const cell = cells.find((c) => c.id === p.cellId);
     if (!cell) return p;
     const fit = coverFit(cell.width, cell.height, p.naturalWidth, p.naturalHeight);
+    const ratio = p.width > 0 ? fit.width / p.width : 1;
     const clamped = clampOffset(
       cell.width,
       cell.height,
       fit.width * p.zoom,
       fit.height * p.zoom,
-      p.offsetX,
-      p.offsetY,
+      p.offsetX * ratio,
+      p.offsetY * ratio,
     );
     return { ...p, x: cell.x, y: cell.y, width: fit.width, height: fit.height, ...clamped };
+  });
+}
+
+/**
+ * 여백 조절 전용: 슬롯(창)만 커지거나 줄고, 사진은 용지 위 실제 크기(mm)·위치를 그대로 유지한다.
+ * 매트지를 넓히듯 여백이 사진 가장자리를 가리거나 드러낼 뿐, 사진이 작아지지 않게 하기 위함.
+ * 새 슬롯을 덮지 못할 만큼 작아지는 경우(여백을 줄여 슬롯이 커질 때)에만 cover 크기까지 키운다.
+ * ponytail: 줌 상한(5배)에 걸리면 그만큼은 줄어든다 — 여백을 극단적으로 키울 때만 해당.
+ */
+function keepPhotosOnPaper(prevCells: LayoutCell[], cells: LayoutCell[], photos: Photo[]): Photo[] {
+  return photos.map((p) => {
+    const prev = prevCells.find((c) => c.id === p.cellId);
+    const cell = cells.find((c) => c.id === p.cellId);
+    if (!prev || !cell) return p;
+    const fit = coverFit(cell.width, cell.height, p.naturalWidth, p.naturalHeight);
+    // 화면에 보이던 사진 폭(mm) = width × zoom → 새 cover 폭 기준 zoom으로 환산
+    const zoom = Math.min(5, Math.max(1, (p.width * p.zoom) / fit.width));
+    // 사진 중심의 용지 좌표를 고정: 슬롯 중심이 움직인 만큼 offset을 반대로 보정
+    const cx = prev.x + prev.width / 2 + p.offsetX;
+    const cy = prev.y + prev.height / 2 + p.offsetY;
+    const clamped = clampOffset(
+      cell.width,
+      cell.height,
+      fit.width * zoom,
+      fit.height * zoom,
+      cx - (cell.x + cell.width / 2),
+      cy - (cell.y + cell.height / 2),
+    );
+    return { ...p, x: cell.x, y: cell.y, width: fit.width, height: fit.height, zoom, ...clamped };
   });
 }
 
@@ -150,7 +177,10 @@ export function maxMarginFor(widthMm: number, heightMm: number): number {
   return Math.max(0, Math.floor((Math.min(widthMm, heightMm) - MIN_CONTENT_MM) / 2));
 }
 
-/** 특정 한 변의 여백 상한 — 마주보는 변 값을 고려해 콘텐츠 영역이 음수가 되지 않게 제한 */
+/**
+ * 특정 한 변의 여백 상한 — '네 변 동일'과 같은 상한(maxMarginFor)을 넘지 않고,
+ * 마주보는 변 값을 고려해 콘텐츠 영역이 최소 크기 아래로 줄지 않게 제한
+ */
 export function maxMarginForSide(widthMm: number, heightMm: number, side: MarginSide, margins: Margins): number {
   const isVertical = side === 'top' || side === 'bottom';
   const dimension = isVertical ? heightMm : widthMm;
@@ -161,12 +191,38 @@ export function maxMarginForSide(widthMm: number, heightMm: number, side: Margin
     : side === 'left'
       ? margins.right
       : margins.left;
-  return Math.max(0, Math.floor(dimension - MIN_CONTENT_MM - opposite));
+  return Math.max(0, Math.min(maxMarginFor(widthMm, heightMm), Math.floor(dimension - MIN_CONTENT_MM - opposite)));
 }
 
 const initialPaper = getPaperSize(DEFAULT_PAPER_ID) ?? PAPER_SIZES[0]; // A4 세로
 const INITIAL_MARGIN_MM = defaultMarginFor(initialPaper.widthMm, initialPaper.heightMm); // A4 → 30mm
+const INITIAL_MARGINS: Margins = {
+  top: INITIAL_MARGIN_MM,
+  right: INITIAL_MARGIN_MM,
+  bottom: INITIAL_MARGIN_MM,
+  left: INITIAL_MARGIN_MM,
+};
 const INITIAL_GUTTER_MM = defaultGutterFor(initialPaper.widthMm, initialPaper.heightMm); // A4 → 2mm
+
+/** Undo/Redo 대상 — 선택 상태·라이브러리(업로드 목록)는 되돌리지 않는다 */
+function toHistoryState(s: EditorState) {
+  return {
+    paperId: s.paperId,
+    widthMm: s.widthMm,
+    heightMm: s.heightMm,
+    orientation: s.orientation,
+    bleedMm: s.bleedMm,
+    layoutType: s.layoutType,
+    gutterMm: s.gutterMm,
+    margins: s.margins,
+    singleShape: s.singleShape,
+    photoFrame: s.photoFrame,
+    cells: s.cells,
+    photos: s.photos,
+    texts: s.texts,
+  };
+}
+type HistoryState = ReturnType<typeof toHistoryState>;
 
 export const useEditorStore = create<EditorState>()(
   temporal(
@@ -177,26 +233,12 @@ export const useEditorStore = create<EditorState>()(
       orientation: 'portrait',
       bleedMm: 3,
 
-      layoutMode: 'grid',
       layoutType: 1,
       gutterMm: INITIAL_GUTTER_MM,
-      margins: {
-        top: INITIAL_MARGIN_MM,
-        right: INITIAL_MARGIN_MM,
-        bottom: INITIAL_MARGIN_MM,
-        left: INITIAL_MARGIN_MM,
-      },
+      margins: INITIAL_MARGINS,
       singleShape: 'rect',
       photoFrame: 'none',
-      cells: calcCells(
-        initialPaper.widthMm,
-        initialPaper.heightMm,
-        1,
-        'portrait',
-        INITIAL_GUTTER_MM,
-        { top: INITIAL_MARGIN_MM, right: INITIAL_MARGIN_MM, bottom: INITIAL_MARGIN_MM, left: INITIAL_MARGIN_MM },
-        'rect',
-      ),
+      cells: calcCells(initialPaper.widthMm, initialPaper.heightMm, 1, INITIAL_GUTTER_MM, INITIAL_MARGINS, 'rect'),
 
       library: [],
       photos: [],
@@ -205,11 +247,8 @@ export const useEditorStore = create<EditorState>()(
       texts: [],
       selectedTextId: null,
 
-      setPaper: (id, custom) => {
-        const base =
-          id === 'custom' && custom
-            ? { widthMm: Math.min(custom.w, custom.h), heightMm: Math.max(custom.w, custom.h) }
-            : getPaperSize(id) ?? initialPaper;
+      setPaper: (id) => {
+        const base = getPaperSize(id) ?? initialPaper;
         const { orientation } = get();
         const widthMm = orientation === 'portrait' ? base.widthMm : base.heightMm;
         const heightMm = orientation === 'portrait' ? base.heightMm : base.widthMm;
@@ -217,19 +256,18 @@ export const useEditorStore = create<EditorState>()(
           // 여백·간격은 용지 크기에 비례해 유지: 짧은 변 비율만큼 스케일 (A4 30mm → A2 60mm)
           const scale = Math.min(widthMm, heightMm) / Math.min(s.widthMm, s.heightMm);
           const gutterMm = Math.min(maxGutterFor(widthMm, heightMm), Math.round(s.gutterMm * scale));
-          let margins = { ...s.margins };
-          (Object.keys(margins) as MarginSide[]).forEach((side) => {
-            margins = { ...margins, [side]: Math.round(margins[side] * scale) };
-          });
+          const sides = Object.keys(s.margins) as MarginSide[];
+          const margins = { ...s.margins };
+          for (const side of sides) margins[side] = Math.round(margins[side] * scale);
           // 변마다 상한을 재계산해 새 용지에서도 콘텐츠 영역이 남도록 클램프
-          (Object.keys(margins) as MarginSide[]).forEach((side) => {
-            margins = {
-              ...margins,
-              [side]: Math.min(margins[side], maxMarginForSide(widthMm, heightMm, side, margins)),
-            };
-          });
+          // (앞 변을 줄인 결과를 뒤 변 상한 계산에 반영하므로 순서대로 처리)
+          for (const side of sides) {
+            margins[side] = Math.min(margins[side], maxMarginForSide(widthMm, heightMm, side, margins));
+          }
           const next = { ...s, paperId: id, widthMm, heightMm, margins, gutterMm };
-          return { ...next, cells: deriveCells(next), photos: [] , selectedId: null };
+          const cells = deriveCells(next);
+          // 레이아웃(셀 id)은 그대로이므로 배치된 사진은 유지하고 새 용지 크기에 다시 맞춘다
+          return { ...next, cells, photos: refitPhotos(cells, s.photos) };
         });
       },
 
@@ -237,7 +275,9 @@ export const useEditorStore = create<EditorState>()(
         set((s) => {
           const orientation: Orientation = s.orientation === 'portrait' ? 'landscape' : 'portrait';
           const next = { ...s, orientation, widthMm: s.heightMm, heightMm: s.widthMm };
-          return { ...next, cells: deriveCells(next), photos: [], selectedId: null };
+          const cells = deriveCells(next);
+          // 방향만 바뀌고 셀 id는 같으므로 사진을 유지한 채 새 셀에 다시 맞춘다
+          return { ...next, cells, photos: refitPhotos(cells, s.photos) };
         }),
 
       setBleed: (bleedMm) => set({ bleedMm }),
@@ -263,7 +303,8 @@ export const useEditorStore = create<EditorState>()(
           const margins: Margins = { top: clamped, right: clamped, bottom: clamped, left: clamped };
           const next = { ...s, margins };
           const cells = deriveCells(next);
-          return { ...next, cells, photos: refitPhotos(cells, s.photos) };
+          // 사진은 크기·위치 그대로 두고 여백(창)만 바뀌게 한다
+          return { ...next, cells, photos: keepPhotosOnPaper(s.cells, cells, s.photos) };
         }),
 
       setMarginSide: (side, mm) =>
@@ -273,7 +314,8 @@ export const useEditorStore = create<EditorState>()(
           const margins: Margins = { ...s.margins, [side]: clamped };
           const next = { ...s, margins };
           const cells = deriveCells(next);
-          return { ...next, cells, photos: refitPhotos(cells, s.photos) };
+          // 사진은 크기·위치 그대로 두고 여백(창)만 바뀌게 한다
+          return { ...next, cells, photos: keepPhotosOnPaper(s.cells, cells, s.photos) };
         }),
 
       setSingleShape: (singleShape) =>
@@ -287,6 +329,17 @@ export const useEditorStore = create<EditorState>()(
       setPhotoFrame: (photoFrame) => set({ photoFrame }),
 
       addLibraryItems: (items) => set((s) => ({ library: [...s.library, ...items] })),
+
+      removeLibraryItems: (ids) =>
+        set((s) => {
+          const gone = new Set(s.library.filter((l) => ids.includes(l.id)).map((l) => l.src));
+          const photos = s.photos.filter((p) => !gone.has(p.src));
+          return {
+            library: s.library.filter((l) => !ids.includes(l.id)),
+            photos,
+            selectedId: photos.some((p) => p.id === s.selectedId) ? s.selectedId : null,
+          };
+        }),
 
       /** 기획안 v2 §6: 드롭 시 cover 자동 채움 + 중앙 정렬 */
       assignToCell: (libraryId, cellId) => {
@@ -426,39 +479,15 @@ export const useEditorStore = create<EditorState>()(
         })),
 
       selectText: (selectedTextId) => set({ selectedTextId, selectedId: null }),
-
-      hydrate: (state) =>
-        set((s) => {
-          const merged = { ...s, ...state };
-          // 지원하지 않는 과거 레이아웃 값은 가장 가까운 지원 장수로 스냅
-          const layoutType = (LAYOUT_COUNTS as readonly LayoutType[]).includes(merged.layoutType)
-            ? merged.layoutType
-            : (LAYOUT_COUNTS as readonly LayoutType[]).reduce((best, n) =>
-                Math.abs(n - merged.layoutType) < Math.abs(best - merged.layoutType) ? n : best,
-              );
-          const next = { ...merged, layoutType };
-          return { ...next, cells: deriveCells(next) };
-        }),
     }),
     {
       limit: 50, // 기획안 v2 §8: 히스토리 상한 50
-      partialize: (s) => ({
-        paperId: s.paperId,
-        widthMm: s.widthMm,
-        heightMm: s.heightMm,
-        orientation: s.orientation,
-        bleedMm: s.bleedMm,
-        layoutType: s.layoutType,
-        gutterMm: s.gutterMm,
-        margins: s.margins,
-        singleShape: s.singleShape,
-        photoFrame: s.photoFrame,
-        cells: s.cells,
-        photos: s.photos,
-        texts: s.texts,
-      }),
+      // 선택(select/selectText)처럼 partialize 대상이 안 바뀌는 set까지 히스토리에 쌓이면
+      // 실행취소를 눌러도 화면이 그대로인 "빈 단계"가 생기므로, 변경이 없으면 기록하지 않는다.
+      // ponytail: 텍스트 입력은 글자마다 한 단계씩 기록된다 — 입력 단위 묶기(디바운스)는 미적용.
+      partialize: toHistoryState,
+      equality: (past: HistoryState, current: HistoryState) => shallow(past, current),
     },
   ),
 );
 
-export const useEditorUndo = () => useEditorStore.temporal.getState();
