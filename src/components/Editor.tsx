@@ -111,6 +111,13 @@ export default function Editor() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  /*
+   * 다운로드 흐름 (화면에 보이는 캔버스를 그대로 인쇄 파일로 뽑는다):
+   * 1) handleExport: 선택 해제 + pending 설정 → PaperCanvas가 export 모드로 바뀌어 가이드·액자를 숨기고
+   * 2) PaperCanvas가 사진을 IndexedDB 원본(고화질)으로 바꿔 그린 뒤 onOriginalsReady로 알리면
+   * 3) 아래 useEffect가 두 프레임 기다렸다가 재단 영역만 잘라 PDF/PNG/JPG로 저장하고
+   * 4) pending을 비워 편집 화면(가이드·편집용 축소본)으로 되돌린다.
+   */
   const handleExport = (format: ExportFormat) => {
     if (!stageRef.current) return;
     select(null); // 선택 테두리가 출력물에 찍히지 않도록
@@ -206,7 +213,7 @@ export default function Editor() {
                   aria-pressed={active}
                   disabled={loadingSamples}
                   className={`h-10 whitespace-nowrap rounded-full px-3.5 text-xs transition-colors lg:h-7 ${
-                    active ? 'bg-ink text-paper' : 'text-neutral-600 hover:text-accent'
+                    active ? 'bg-ink text-paper' : 'text-ink-muted hover:text-accent'
                   }`}
                 >
                   {label}
@@ -217,13 +224,13 @@ export default function Editor() {
         </div>
         <div className="flex gap-1.5">
           <button
-            className="h-11 whitespace-nowrap rounded-full border border-line px-3.5 text-xs text-neutral-700 transition-colors hover:border-accent hover:text-accent lg:h-8"
+            className="h-11 whitespace-nowrap rounded-full border border-line px-3.5 text-xs text-ink-80 transition-colors hover:border-accent hover:text-accent lg:h-8"
             onClick={() => useEditorStore.temporal.getState().undo()}
           >
             실행취소
           </button>
           <button
-            className="h-11 whitespace-nowrap rounded-full border border-line px-3.5 text-xs text-neutral-700 transition-colors hover:border-accent hover:text-accent lg:h-8"
+            className="h-11 whitespace-nowrap rounded-full border border-line px-3.5 text-xs text-ink-80 transition-colors hover:border-accent hover:text-accent lg:h-8"
             onClick={() => useEditorStore.temporal.getState().redo()}
           >
             다시실행
@@ -250,7 +257,7 @@ export default function Editor() {
             useOriginals={pending !== null}
             onOriginalsReady={handleOriginalsReady}
           />
-          {/* 데스크탑 전용 — 모바일은 캔버스가 좁아 사진을 가리므로 바텀시트의 '선택한 사진' 도구를 쓴다 */}
+          {/* 데스크탑 전용 리모컨(캔버스 오른쪽 아래에 떠 있음) — 모바일은 캔버스가 좁아 사진을 가리므로 바텀시트의 '선택한 사진' 도구를 쓴다 */}
           <div className="hidden lg:block">
             <PhotoToolbar />
           </div>
@@ -266,7 +273,7 @@ export default function Editor() {
       {tab && (
         <div
           key={tab}
-          className="max-h-[48dvh] shrink-0 animate-sheet-up overflow-y-auto rounded-t-2xl border-t border-line bg-sheet lg:hidden"
+          className="max-h-[48dvh] shrink-0 animate-sheet-up overflow-y-auto rounded-t-lg border-t border-line bg-sheet lg:hidden"
         >
           {tab === 'photos' ? libraryPanel : tab === 'frame' && FRAME_PREVIEW_ENABLED ? <FramePanel /> : settings}
         </div>
@@ -277,7 +284,7 @@ export default function Editor() {
             key={key}
             onClick={() => setTab(tab === key ? null : key)}
             aria-pressed={tab === key}
-            className={`relative min-h-11 flex-1 py-3 text-sm transition-colors ${tab === key ? 'font-semibold text-accent' : 'text-neutral-500'}`}
+            className={`relative min-h-11 flex-1 py-3 text-sm transition-colors ${tab === key ? 'font-semibold text-accent' : 'text-ink-muted'}`}
           >
             {/* 활성 탭 상단 표시선 */}
             <span

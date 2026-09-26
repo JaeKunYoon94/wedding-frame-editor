@@ -16,7 +16,7 @@ export default function StartLink() {
       onClick={(e) => !(e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) && setPending(true)}
       aria-busy={pending}
       // DESIGN.md button-store-hero: Action Blue pill, 18px/300, 14×28px 패딩
-      className="animate-rise-in group mt-9 inline-flex min-h-11 items-center gap-2 rounded-full bg-accent px-7 py-3.5 text-[18px] font-light leading-none text-white transition-colors [animation-delay:320ms] hover:bg-accent-focus"
+      className="animate-rise-in group mt-9 inline-flex min-h-11 items-center gap-2 rounded-full bg-accent px-7 py-3.5 text-button-large font-light text-white transition-colors [animation-delay:320ms] hover:bg-accent-focus"
     >
       {pending ? (
         <>

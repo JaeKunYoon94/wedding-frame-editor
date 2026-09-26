@@ -12,7 +12,7 @@ const Editor = dynamic(() => import("@/components/Editor"), {
         aria-hidden
         className="h-8 w-8 rounded-full border-2 border-accent/25 border-t-accent motion-safe:animate-spin"
       />
-      <p className="font-display text-sm text-neutral-600">에디터를 준비하고 있어요…</p>
+      <p className="font-display text-sm text-ink-muted">에디터를 준비하고 있어요…</p>
     </div>
   ),
 });

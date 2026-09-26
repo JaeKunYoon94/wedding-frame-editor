@@ -21,26 +21,26 @@ export default function FramePanel() {
       <div className="grid grid-cols-3 gap-1.5">
         <button
           onClick={() => setFrame('none')}
-          className={`flex h-14 flex-col items-center justify-center rounded-md border text-xs transition-colors ${
+          className={`flex h-14 flex-col items-center justify-center rounded-sm border text-xs transition-colors ${
             frame === 'none' ? 'border-accent ring-2 ring-accent/30' : 'border-line hover:border-accent'
           }`}
         >
-          <span className="text-neutral-500">없음</span>
+          <span className="text-ink-muted">없음</span>
         </button>
         {FRAME_SAMPLES.map((f) => (
           <button
             key={f.id}
             onClick={() => setFrame(f.id)}
             title={`${f.label} · 몰딩 ${f.widthMm}mm`}
-            className={`flex h-14 flex-col items-center justify-end overflow-hidden rounded-md border p-1 transition-colors ${
+            className={`flex h-14 flex-col items-center justify-end overflow-hidden rounded-sm border p-1 transition-colors ${
               frame === f.id ? 'border-accent ring-2 ring-accent/30' : 'border-line hover:border-accent'
             }`}
           >
             <span
-              className="mb-1 h-6 w-full rounded-sm border border-black/10"
+              className="mb-1 h-6 w-full rounded-xs border border-black/10"
               style={{ background: f.fill }}
             />
-            <span className="text-[11px] leading-none text-neutral-600">{f.label}</span>
+            <span className="text-xs leading-none text-ink-muted">{f.label}</span>
           </button>
         ))}
       </div>
@@ -48,16 +48,16 @@ export default function FramePanel() {
       {framed && (
         <div className="mt-3 space-y-2">
           <div>
-            <p className="mb-1 text-xs text-neutral-500">매트지 폭</p>
+            <p className="mb-1 text-xs text-ink-muted">매트지 폭</p>
             <div className="flex gap-1.5">
               {([0, 30, 50] as MatWidthMm[]).map((w) => (
                 <button
                   key={w}
                   onClick={() => setMatWidth(w)}
-                  className={`rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                  className={`rounded-full border px-2.5 py-1.5 text-sm transition-colors ${
                     matWidthMm === w
                       ? 'border-accent bg-accent text-white'
-                      : 'border-line bg-sheet text-neutral-700 hover:border-accent'
+                      : 'border-line bg-sheet text-ink-80 hover:border-accent'
                   }`}
                 >
                   {w === 0 ? '없음' : w === 30 ? `좁게 ${w}mm` : `넓게 ${w}mm`}
@@ -68,18 +68,18 @@ export default function FramePanel() {
 
           {matWidthMm > 0 && (
             <div>
-              <p className="mb-1 text-xs text-neutral-500">매트지 색상</p>
+              <p className="mb-1 text-xs text-ink-muted">매트지 색상</p>
               <div className="flex gap-1.5">
                 {(Object.keys(MAT_COLORS) as MatColor[]).map((c) => (
                   <button
                     key={c}
                     onClick={() => setMatColor(c)}
-                    className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                    className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-sm transition-colors ${
                       matColor === c ? 'border-accent ring-2 ring-accent/30' : 'border-line hover:border-accent'
                     }`}
                   >
                     <span
-                      className="h-4 w-4 rounded-sm border border-neutral-300"
+                      className="h-4 w-4 rounded-xs border border-line"
                       style={{ background: MAT_COLORS[c].fill }}
                     />
                     {MAT_COLORS[c].label}
@@ -91,7 +91,7 @@ export default function FramePanel() {
         </div>
       )}
 
-      <p className="mt-2 text-xs text-neutral-500">
+      <p className="mt-2 text-xs text-ink-muted">
         액자·매트지는 화면 미리보기 전용(액자 주문 시 참고용)이며 출력 파일에는 포함되지 않습니다.
       </p>
     </section>

@@ -1,5 +1,10 @@
 'use client';
 
+// 에디터 상태 저장소(zustand + zundo): 용지·레이아웃·여백·배치된 사진·텍스트와 이를 바꾸는 모든 동작.
+// 메모리에만 있고 새로고침하면 사라진다(원본 사진 Blob만 IndexedDB). 모든 좌표·크기는 mm.
+// 사진 좌표 모델: 사진은 슬롯(cell)에 속하고, width/height = 슬롯을 꽉 덮는 cover 크기(zoom=1 기준),
+// 화면에 그려지는 크기 = width×zoom, offsetX/Y = 슬롯 중심에서 사진 중심까지의 거리(mm).
+
 import { create } from 'zustand';
 import { temporal } from 'zundo';
 import { shallow } from 'zustand/shallow';
@@ -71,8 +76,6 @@ interface EditorState {
   /** 라이브러리 항목과 그 사진이 배치된 슬롯을 함께 지운다 (blob: URL 해제는 호출 측 책임) */
   removeLibraryItems: (ids: string[]) => void;
   assignToCell: (libraryId: string, cellId: string) => void;
-  /** 배치된 사진을 다른 슬롯으로 이동(대상에 사진이 있으면 서로 교환) */
-  movePhotoToCell: (photoId: string, targetCellId: string) => void;
   updatePhoto: (id: string, patch: Partial<Photo>) => void;
   nudgePhotoInCell: (id: string, dxMm: number, dyMm: number) => void;
   zoomPhotoInCell: (id: string, factor: number) => void;
@@ -86,6 +89,7 @@ interface EditorState {
   selectText: (id: string | null) => void;
 }
 
+/** 현재 용지·레이아웃·여백·간격으로 슬롯 좌표를 다시 계산한다 (상태를 바꾸는 동작마다 호출) */
 function deriveCells(
   s: Pick<
     EditorState,
@@ -247,6 +251,7 @@ export const useEditorStore = create<EditorState>()(
       texts: [],
       selectedTextId: null,
 
+      /** 용지 변경: 방향(세로/가로)은 유지하고, 여백·간격은 새 용지 크기에 비례해 조정 */
       setPaper: (id) => {
         const base = getPaperSize(id) ?? initialPaper;
         const { orientation } = get();
@@ -284,6 +289,8 @@ export const useEditorStore = create<EditorState>()(
 
       setLayout: (layoutType) =>
         set((s) => {
+          // 분할 수가 바뀌면 슬롯 id 구성이 달라져 사진을 옮겨 담을 기준이 없으므로 배치를 비운다
+          // (라이브러리의 업로드 사진은 그대로 남는다)
           const next = { ...s, layoutType };
           return { ...next, cells: deriveCells(next), photos: [], selectedId: null };
         }),
@@ -332,6 +339,7 @@ export const useEditorStore = create<EditorState>()(
 
       removeLibraryItems: (ids) =>
         set((s) => {
+          // 배치된 사진은 라이브러리 항목과 같은 src(blob: URL)를 공유하므로 src로 찾아 함께 지운다
           const gone = new Set(s.library.filter((l) => ids.includes(l.id)).map((l) => l.src));
           const photos = s.photos.filter((p) => !gone.has(p.src));
           return {
@@ -378,36 +386,10 @@ export const useEditorStore = create<EditorState>()(
         });
       },
 
-      /**
-       * 용지 안에서 배치된 사진을 다른 슬롯으로 드래그 이동.
-       * 대상 슬롯에 이미 사진이 있으면 서로 자리를 맞바꾼다.
-       * 한 레이아웃의 슬롯은 모두 같은 크기이므로 zoom·offset은 그대로 유지해도 된다.
-       */
-      movePhotoToCell: (photoId, targetCellId) => {
-        const { photos, cells } = get();
-        const source = photos.find((p) => p.id === photoId);
-        const targetCell = cells.find((c) => c.id === targetCellId);
-        if (!source || !targetCell || source.cellId === targetCellId) return;
-        const sourceCell = cells.find((c) => c.id === source.cellId);
-        const occupant = photos.find((p) => p.cellId === targetCellId);
-        set({
-          photos: photos.map((p) => {
-            if (p.id === source.id) {
-              return { ...p, cellId: targetCellId, x: targetCell.x, y: targetCell.y };
-            }
-            if (sourceCell && occupant && p.id === occupant.id) {
-              return { ...p, cellId: sourceCell.id, x: sourceCell.x, y: sourceCell.y };
-            }
-            return p;
-          }),
-          selectedId: source.id,
-          selectedTextId: null,
-        });
-      },
-
       updatePhoto: (id, patch) =>
         set((s) => ({ photos: s.photos.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
 
+      /** 슬롯 안에서 사진 이동(드래그·화살표). 슬롯에 빈틈이 생기지 않도록 이동 범위를 clampOffset으로 제한 */
       nudgePhotoInCell: (id, dx, dy) => {
         const { photos, cells } = get();
         const p = photos.find((x) => x.id === id);
@@ -424,6 +406,10 @@ export const useEditorStore = create<EditorState>()(
         get().updatePhoto(id, clamped);
       },
 
+      /**
+       * 슬롯 안에서 확대/축소(버튼·핀치). zoom 1(=cover, 슬롯을 딱 덮는 크기)~5배.
+       * 1 미만으로 줄이면 슬롯에 빈틈이 생기므로 막고, 줄어든 만큼 offset도 다시 제한한다.
+       */
       zoomPhotoInCell: (id, factor) => {
         const { photos, cells } = get();
         const p = photos.find((x) => x.id === id);
@@ -460,7 +446,7 @@ export const useEditorStore = create<EditorState>()(
           y: (heightMm - fontSizeMm) / 2,
           width,
           fontSizeMm,
-          color: '#1c1917',
+          color: '#1d1d1f', // DESIGN.md ink
           align: 'center',
           bold: false,
           rotation: 0,

@@ -32,6 +32,8 @@ export default function LibraryPanel({
     async (files: File[]) => {
       setError(null);
       setPendingCount(files.length);
+      // 한 장씩 순차 처리: 고해상도 사진을 동시에 디코딩하면 모바일에서 메모리가 부족해 탭이 죽을 수 있다.
+      // 형식·크기 검증(실제 디코딩 결과 기준)은 processUpload가 하고, 실패 이유는 내부 구현을 노출하지 않게 뭉뚱그린다.
       for (const file of files) {
         try {
           const item = await processUpload(file);
@@ -48,6 +50,7 @@ export default function LibraryPanel({
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    // 파일 선택 창·드롭의 1차 필터(MIME 허용 목록). 확장자 위장은 processUpload의 디코딩 검증에서 걸러진다.
     accept: {
       'image/jpeg': [],
       'image/png': [],
@@ -61,25 +64,31 @@ export default function LibraryPanel({
     <div className="flex h-full flex-col gap-3 p-4">
       <div
         {...getRootProps()}
-        className={`cursor-pointer rounded-xl border border-dashed p-5 text-center text-sm transition-all ${
+        className={`cursor-pointer rounded-lg border border-dashed p-5 text-center text-sm transition-all ${
           isDragActive
             ? 'scale-[1.02] border-accent bg-accent-soft'
             : 'border-accent/40 bg-paper hover:border-accent hover:bg-accent-soft/50'
         }`}
       >
         <input {...getInputProps()} />
-        <p className="font-display text-base text-ink">사진을 여기로 드래그해주세요</p>
-        <p className="mt-1 text-xs text-neutral-500">또는 눌러서 파일 선택 · JPG/PNG/WEBP/HEIC</p>
+        {/* 모바일(터치)엔 파일 드래그가 없으므로 '눌러서 추가'로 안내한다 — 화면 폭(lg) 기준이라 태블릿 가로 모드에선 데스크탑 문구가 보일 수 있다 */}
+        <p className="font-display text-base text-ink">
+          <span className="lg:hidden">눌러서 사진 추가하기</span>
+          <span className="hidden lg:inline">사진을 여기로 드래그해주세요</span>
+        </p>
+        <p className="mt-1 text-xs text-ink-muted">
+          <span className="hidden lg:inline">또는 눌러서 파일 선택 · </span>JPG/PNG/WEBP/HEIC
+        </p>
       </div>
 
       {library.length > 0 && (
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-ink-muted">
           {placingId ? '캔버스의 슬롯을 눌러 배치하세요' : '사진을 눌러 고른 뒤 슬롯을 누르세요'}
         </p>
       )}
 
-      <p className="text-xs text-neutral-500">사진은 내 기기를 벗어나지 않습니다.</p>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <p className="text-xs text-ink-muted">사진은 내 기기를 벗어나지 않습니다.</p>
+      {error && <p className="text-xs text-danger">{error}</p>}
 
       <div className="grid flex-1 auto-rows-min grid-cols-3 gap-2 overflow-y-auto lg:grid-cols-2">
         {library.map((item, i) => {
@@ -94,7 +103,7 @@ export default function LibraryPanel({
                 e.dataTransfer.effectAllowed = 'copy';
               }}
               onClick={() => onPlacingChange?.(picked ? null : item.id)}
-              className={`relative aspect-square touch-manipulation cursor-grab overflow-hidden rounded-lg border bg-sheet transition-colors hover:border-accent active:cursor-grabbing ${
+              className={`relative aspect-square touch-manipulation cursor-grab overflow-hidden rounded-sm border bg-sheet transition-colors hover:border-accent active:cursor-grabbing ${
                 picked ? 'border-accent ring-2 ring-accent/40' : 'border-line'
               }`}
               style={{ WebkitTouchCallout: 'none' }}
@@ -117,18 +126,18 @@ export default function LibraryPanel({
               />
 
               {/* 순번 배지 */}
-              <span className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-ink/75 px-1 text-[11px] font-semibold text-white">
+              <span className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-ink/75 px-1 text-xs font-semibold text-white">
                 {i + 1}
               </span>
 
               {/* 이미 배치된 사진 표시 */}
               {placed && !picked && (
-                <span className="absolute inset-x-0 bottom-0 bg-neutral-800/70 py-0.5 text-[11px] text-white">
+                <span className="absolute inset-x-0 bottom-0 bg-ink/70 py-0.5 text-xs text-white">
                   배치됨
                 </span>
               )}
               {picked && (
-                <span className="absolute inset-x-0 bottom-0 bg-accent/90 py-0.5 text-[11px] text-white">
+                <span className="absolute inset-x-0 bottom-0 bg-accent/90 py-0.5 text-xs text-white">
                   선택됨
                 </span>
               )}
@@ -138,9 +147,9 @@ export default function LibraryPanel({
         {Array.from({ length: pendingCount }).map((_, i) => (
           <div
             key={`pending-${i}`}
-            className="flex aspect-square items-center justify-center rounded-lg border border-line bg-paper"
+            className="flex aspect-square items-center justify-center rounded-sm border border-line bg-paper"
           >
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-accent" />
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-line border-t-accent" />
           </div>
         ))}
       </div>

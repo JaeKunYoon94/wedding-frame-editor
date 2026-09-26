@@ -56,7 +56,7 @@ const GUTTER_RATIOS = [0, 1, 2.5, 5];
 // 사진·텍스트 도구 버튼 공통 스타일 (모바일 터치 타깃 44px)
 const TOOL_BTN =
   'min-h-11 rounded-full border border-line px-3 py-1 transition-colors hover:border-accent hover:text-accent lg:min-h-8';
-const DANGER_BTN = 'min-h-11 rounded-full border border-red-200 px-3 py-1 text-red-700 hover:bg-red-50 lg:min-h-8';
+const DANGER_BTN = 'min-h-11 rounded-full border border-danger-line px-3 py-1 text-danger hover:bg-danger-soft lg:min-h-8';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -83,7 +83,7 @@ function Chip({
       // DESIGN.md configurator-option-chip: 흰 pill + 헤어라인. 선택 시 2px Focus Blue 테두리(1px border + 1px ring — 폭이 변해 글자가 밀리지 않게)
       // 색만으로 상태를 구분하지 않도록 선택 시 굵기(600)도 함께 바꾼다. 모바일 터치 타깃 44px
       className={`min-h-11 rounded-full border bg-sheet px-3.5 py-1.5 text-sm transition-colors lg:min-h-8 ${
-        active ? 'border-accent-focus font-semibold text-ink ring-1 ring-accent-focus' : 'border-line text-neutral-700 hover:border-neutral-400'
+        active ? 'border-accent-focus font-semibold text-ink ring-1 ring-accent-focus' : 'border-line text-ink-80 hover:border-accent'
       }`}
     >
       {children}
@@ -165,7 +165,7 @@ export default function SettingsPanel({
 
         {s.layoutType === 1 ? (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-neutral-500">사진 형태</span>
+            <span className="text-xs text-ink-muted">사진 형태</span>
             <Chip active={s.singleShape === 'rect'} onClick={() => s.setSingleShape('rect')}>
               용지 꽉 채움
             </Chip>
@@ -174,13 +174,13 @@ export default function SettingsPanel({
             </Chip>
           </div>
         ) : (
-          <p className="mt-1 text-xs text-neutral-500">슬롯은 정사각형입니다.</p>
+          <p className="mt-1 text-xs text-ink-muted">슬롯은 정사각형입니다.</p>
         )}
 
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs text-neutral-500">간격</span>
-            <span className="text-xs font-semibold text-neutral-700">{s.gutterMm}mm</span>
+            <span className="text-xs text-ink-muted">간격</span>
+            <span className="text-xs font-semibold text-ink-80">{s.gutterMm}mm</span>
           </div>
           <input
             type="range"
@@ -203,12 +203,13 @@ export default function SettingsPanel({
 
         <div className="mt-3">
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-xs text-neutral-500">여백</span>
+            <span className="text-xs text-ink-muted">여백</span>
             <div className="flex gap-1">
               {/* 동일 모드로 돌아갈 땐 위쪽 값으로 네 변을 맞춰, 화면 표시와 실제 값이 어긋나지 않게 한다 */}
               <Chip
                 active={marginLinked}
                 onClick={() => {
+                  // '변마다 따로'에서 돌아올 때 네 변을 '위' 값 하나로 맞춘다 (슬라이더가 가리킬 값이 하나여야 하므로)
                   if (!marginLinked) s.setMargin(s.margins.top);
                   setMarginLinked(true);
                 }}
@@ -248,7 +249,7 @@ export default function SettingsPanel({
           ) : (
             <MarginSidesEditor />
           )}
-          <p className="mt-1 text-xs text-neutral-500">사진 바깥 흰 여백 — 웨딩 사진은 넉넉하게 권장합니다.</p>
+          <p className="mt-1 text-xs text-ink-muted">사진 바깥 흰 여백 — 웨딩 사진은 넉넉하게 권장합니다.</p>
         </div>
       </Section>
 
@@ -267,7 +268,7 @@ export default function SettingsPanel({
               </Chip>
             ))}
           </div>
-          <p className="mt-1 text-xs text-neutral-500">사진마다 테두리 디자인을 입힙니다. 출력 파일에도 반영됩니다.</p>
+          <p className="mt-1 text-xs text-ink-muted">사진마다 테두리 디자인을 입힙니다. 출력 파일에도 반영됩니다.</p>
         </Section>
       )}
 
@@ -279,11 +280,12 @@ export default function SettingsPanel({
             </Chip>
           ))}
         </div>
-        <p className="mt-1.5 text-xs text-neutral-500">
+        <p className="mt-1.5 text-xs text-ink-muted">
           회색: 재단 시 잘리는 영역 — 화면 가이드일 뿐이며 출력 파일에는 찍히지 않습니다.
         </p>
       </Section>
 
+      {/* 선택한 사진·필터: 리모컨(PhotoToolbar)에 없는 회전 90°·흑백은 데스크탑에서도 여기서 쓴다 */}
       {s.selectedId && (
         <Section title="선택한 사진">
           <PhotoTools />
@@ -300,11 +302,11 @@ export default function SettingsPanel({
         <Section title="텍스트">
           <button
             onClick={() => s.addText()}
-            className="min-h-11 w-full rounded-lg border border-dashed border-accent/60 bg-accent-soft/40 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft"
+            className="min-h-11 w-full rounded-full border border-dashed border-accent/60 bg-accent-soft/40 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft"
           >
             + 텍스트 추가
           </button>
-          <p className="mt-1.5 text-xs text-neutral-500">용지 위 아무 곳에나 드래그해 배치할 수 있습니다.</p>
+          <p className="mt-1.5 text-xs text-ink-muted">용지 위 아무 곳에나 드래그해 배치할 수 있습니다.</p>
         </Section>
       )}
 
@@ -319,11 +321,11 @@ export default function SettingsPanel({
           <button
             onClick={onPreview}
             disabled={!hasPhotos || exporting}
-            className="min-h-11 w-full rounded-lg border border-line py-2 text-sm font-semibold disabled:opacity-40"
+            className="min-h-11 w-full rounded-full border border-line py-2 text-sm font-semibold disabled:opacity-40"
           >
             액자 미리보기
           </button>
-          <p className="mt-1.5 text-xs text-neutral-500">현재 조판을 액자로 걸어 놓은 모습으로 미리 봅니다.</p>
+          <p className="mt-1.5 text-xs text-ink-muted">현재 조판을 액자로 걸어 놓은 모습으로 미리 봅니다.</p>
         </Section>
       )}
 
@@ -332,26 +334,26 @@ export default function SettingsPanel({
           <button
             onClick={() => onExport('pdf')}
             disabled={exporting}
-            className="min-h-11 flex-1 rounded-full bg-accent py-2 text-[15px] text-white transition-colors hover:bg-accent-focus disabled:opacity-40"
+            className="min-h-11 flex-1 rounded-full bg-accent py-2 text-body text-white transition-colors hover:bg-accent-focus disabled:opacity-40"
           >
             {exporting ? '내보내는 중…' : 'PDF'}
           </button>
           <button
             onClick={() => onExport('png')}
             disabled={exporting}
-            className="min-h-11 rounded-full border border-accent px-4 py-2 text-[15px] text-accent transition-colors hover:bg-accent-soft disabled:opacity-40"
+            className="min-h-11 rounded-full border border-accent px-4 py-2 text-body text-accent transition-colors hover:bg-accent-soft disabled:opacity-40"
           >
             PNG
           </button>
           <button
             onClick={() => onExport('jpg')}
             disabled={exporting}
-            className="min-h-11 rounded-full border border-accent px-4 py-2 text-[15px] text-accent transition-colors hover:bg-accent-soft disabled:opacity-40"
+            className="min-h-11 rounded-full border border-accent px-4 py-2 text-body text-accent transition-colors hover:bg-accent-soft disabled:opacity-40"
           >
             JPG
           </button>
         </div>
-        <p className="mt-1.5 text-xs text-neutral-500">
+        <p className="mt-1.5 text-xs text-ink-muted">
           출력 크기 {s.widthMm}×{s.heightMm}mm · sRGB 기반 인쇄 파일입니다.
         </p>
       </Section>
@@ -423,13 +425,13 @@ function TextTools() {
         value={textBox.text}
         onChange={(e) => updateText(textBox.id, { text: e.target.value })}
         rows={2}
-        className="w-full resize-none rounded-lg border border-line bg-sheet p-2 text-sm focus:border-accent"
+        className="w-full resize-none rounded-md border border-line bg-sheet p-2 text-sm focus:border-accent"
         placeholder="문구를 입력하세요"
       />
 
       <div className="flex items-center justify-between">
-        <span className="text-xs text-neutral-500">글자 크기</span>
-        <span className="text-xs font-semibold text-neutral-700">{textBox.fontSizeMm}mm</span>
+        <span className="text-xs text-ink-muted">글자 크기</span>
+        <span className="text-xs font-semibold text-ink-80">{textBox.fontSizeMm}mm</span>
       </div>
       <input
         type="range"
@@ -443,7 +445,7 @@ function TextTools() {
       />
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-neutral-500">정렬</span>
+        <span className="text-xs text-ink-muted">정렬</span>
         {(['left', 'center', 'right'] as const).map((align) => (
           <Chip key={align} active={textBox.align === align} onClick={() => updateText(textBox.id, { align })}>
             {align === 'left' ? '왼쪽' : align === 'center' ? '가운데' : '오른쪽'}
@@ -452,11 +454,11 @@ function TextTools() {
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-neutral-500">굵게</span>
+        <span className="text-xs text-ink-muted">굵게</span>
         <Chip active={textBox.bold} onClick={() => updateText(textBox.id, { bold: !textBox.bold })}>
           B
         </Chip>
-        <span className="ml-2 text-xs text-neutral-500">색상</span>
+        <span className="ml-2 text-xs text-ink-muted">색상</span>
         <input
           type="color"
           value={textBox.color}
@@ -564,7 +566,7 @@ function MarginInput({
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <label className="flex flex-col items-center gap-0.5">
-      <span className="text-[11px] leading-none text-neutral-500">{MARGIN_SIDE_LABELS[side]}</span>
+      <span className="text-xs leading-none text-ink-muted">{MARGIN_SIDE_LABELS[side]}</span>
       <span className="relative">
         <input
           type="number"
@@ -586,7 +588,7 @@ function MarginInput({
           aria-label={`${MARGIN_SIDE_LABELS[side]} 여백 mm (최대 ${max}mm)`}
           className="h-11 w-[4.5rem] rounded-md border [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none border-line bg-sheet pl-2 pr-7 text-center text-sm tabular-nums text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 lg:h-8"
         />
-        <span aria-hidden className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-neutral-400">
+        <span aria-hidden className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-ink-muted">
           mm
         </span>
       </span>

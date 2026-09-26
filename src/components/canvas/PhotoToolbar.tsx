@@ -30,7 +30,7 @@ export default function PhotoToolbar() {
     <div
       role="toolbar"
       aria-label="선택한 사진 도구"
-      className="absolute bottom-4 right-4 flex flex-col items-center gap-2 rounded-2xl border border-line bg-sheet p-3"
+      className="absolute bottom-4 right-4 flex flex-col items-center gap-2 rounded-lg border border-line bg-sheet p-3"
     >
       <div className="grid grid-cols-3 gap-1">
         <button className={`${BTN} col-start-2`} aria-label="사진 위로 이동" onClick={() => nudge(0, -1)}>↑</button>
@@ -49,7 +49,7 @@ export default function PhotoToolbar() {
       </div>
       <div className="h-px w-full bg-line" />
       <button
-        className="flex h-11 w-full items-center justify-center rounded-full border border-red-200 px-3 text-sm text-red-700 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus lg:h-9"
+        className="flex h-11 w-full items-center justify-center rounded-full border border-danger-line px-3 text-sm text-danger transition-colors hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus lg:h-9"
         onClick={() => removePhoto(photo.id)}
       >
         삭제

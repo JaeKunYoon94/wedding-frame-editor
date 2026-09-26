@@ -60,7 +60,7 @@ export default function MockupPreview({
       role="dialog"
       aria-modal="true"
     >
-      <div className="relative w-full max-w-3xl overflow-hidden rounded-2xl shadow-product" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-lg shadow-product" onClick={(e) => e.stopPropagation()}>
         <div
           className="relative w-full"
           style={{ aspectRatio: '3 / 2', background: 'linear-gradient(180deg,#efeeeb 0%,#e9e8e4 68%,#e3e2de 100%)' }}
@@ -124,12 +124,13 @@ export default function MockupPreview({
 
         {/* 상단 바 */}
         <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3">
-          <span className="rounded-full bg-black/45 px-3 py-1 text-xs text-white backdrop-blur">
+          {/* DESIGN.md button-icon-circular: 사진 위 컨트롤은 반투명 회색 칩 + ink 글자, 터치 타깃 44px */}
+          <span className="rounded-full bg-chip px-3 py-1 text-xs text-ink backdrop-blur">
             액자 주문 시 참고용 미리보기
           </span>
           <button
             onClick={onClose}
-            className="rounded-full bg-black/55 px-3 py-1.5 text-sm text-white backdrop-blur hover:bg-black/70"
+            className="min-h-11 rounded-full bg-chip px-4 text-sm text-ink backdrop-blur"
           >
             닫기
           </button>
